@@ -23,10 +23,31 @@ fn handle_connection(mut stream: TcpStream) {
     stream.read(&mut buffer).unwrap();
 
     match parse_request_line(&buffer) {
-        Some((method, path, version)) => {
-            println!("Method: {}, Path: {}, Version: {}", method, path, version);
+        Some((method, path, _version)) => {
+            println!("Method: {}, Path: {}", method, path);
 
-            let response = "HTTP/1.1 200 OK\r\nContent-Length: 13\r\n\r\nHello, World!";
+            let (status, body) = match path.as_str() {
+                "/" => (
+                    "HTTP/1.1 200 OK",
+                    "<html><body><h1>Welcome to the home page</h1></body></html>",
+                ),
+                "/about" => (
+                    "HTTP/1.1 200 OK",
+                    "<html><body><h1>About page</h1></body></html>",
+                ),
+                _ => (
+                    "HTTP/1.1 404 Not Found",
+                    "<html><body><h1>404 - Page not found</h1></body></html>",
+                ),
+            };
+
+            let response = format!(
+                "{}\r\nContent-Length: {}\r\nContent-Type: text/html\r\n\r\n{}",
+                status,
+                body.len(),
+                body
+            );
+
             stream.write_all(response.as_bytes()).unwrap();
         }
         None => {
