@@ -1,8 +1,9 @@
 <html>
   <body>
-    <form method="POST" action="/submit">
-      <input type="text" name="message" />
-      <button type="submit">Send</button>
+    <!-- POST: upload a file -->
+    <form method="POST" action="/uploads/hello.txt" enctype="text/plain">
+      <textarea name="content">Hello from a POST!</textarea>
+      <button type="submit">Upload</button>
     </form>
   </body>
 </html>

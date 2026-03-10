@@ -22,8 +22,8 @@ fn get_content_type(path: &str) -> &str {
         "application/octet-stream"
     }
 }
+
 fn serve_file(path: &str) -> Response {
-    // If path ends with "/" append "index.html", otherwise use as-is
     let normalized = if path.ends_with('/') {
         format!("{}index.html", path)
     } else {
@@ -41,11 +41,57 @@ fn serve_file(path: &str) -> Response {
     }
 }
 
+fn handle_post(req: &Request) -> Response {
+    // Reject empty bodies
+    if req.body.is_empty() {
+        return Response::error(StatusCode::BadRequest);
+    }
+
+    // Build a safe file path from the URL path
+    // POST /upload/photo.png → saves to www/upload/photo.png
+    let file_path = format!("www{}", req.path);
+
+    // Make sure the directory exists
+    if let Some(parent) = std::path::Path::new(&file_path).parent() {
+        if let Err(e) = fs::create_dir_all(parent) {
+            eprintln!("Failed to create directory: {}", e);
+            return Response::error(StatusCode::InternalServerError);
+        }
+    }
+
+    // Write the body to disk
+    match fs::write(&file_path, &req.body) {
+        Ok(_) => {
+            let body = format!(
+                "<html><body><h1>Uploaded successfully to {}</h1></body></html>",
+                req.path
+            );
+            Response::new(StatusCode::Ok, "text/html", body.into_bytes())
+        }
+        Err(e) => {
+            eprintln!("Failed to write file: {}", e);
+            Response::error(StatusCode::InternalServerError)
+        }
+    }
+}
+
+fn handle_delete(req: &Request) -> Response {
+    let file_path = format!("www{}", req.path);
+
+    match fs::remove_file(&file_path) {
+        Ok(_) => {
+            let body = format!("<html><body><h1>Deleted {}</h1></body></html>", req.path);
+            Response::new(StatusCode::Ok, "text/html", body.into_bytes())
+        }
+        Err(_) => Response::error(StatusCode::NotFound),
+    }
+}
+
 pub fn handle(req: Request, stream: &mut TcpStream) {
-    println!("Headers: {:?}", req.headers);
     let response = match req.method {
         Method::Get => serve_file(&req.path),
-        Method::Post | Method::Delete => Response::error(StatusCode::MethodNotAllowed),
+        Method::Post => handle_post(&req),
+        Method::Delete => handle_delete(&req),
         Method::Unknown(_) => Response::error(StatusCode::MethodNotAllowed),
     };
 
