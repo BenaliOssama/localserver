@@ -1,10 +1,12 @@
 // src/server.rs
 
+use crate::epoll::{Epoll, MAX_EVENTS, set_nonblocking};
 use crate::handler;
 use crate::request::Request;
 use crate::response::{Response, StatusCode};
 use std::io::Read;
 use std::net::{TcpListener, TcpStream};
+use std::os::unix::io::AsRawFd;
 
 fn handle_connection(mut stream: TcpStream) {
     // Step 1 — read headers first (until \r\n\r\n)
@@ -71,6 +73,13 @@ impl Server {
         Server {
             addr: addr.to_string(),
         }
+    }
+    pub fn run2(&self) -> Result<(), Box<dyn std::error::Error>> {
+        // ── 1. Set up the listening socket ────────────────────────────────
+        let listener = TcpListener::bind(&self.addr)?;
+        set_nonblocking(listener.as_raw_fd())?;
+        println!("Server listening on http://{}", self.addr);
+        Ok(())
     }
 
     pub fn run(&self) -> Result<(), Box<dyn std::error::Error>> {
