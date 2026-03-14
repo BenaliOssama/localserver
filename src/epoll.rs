@@ -69,3 +69,23 @@ impl Drop for Epoll {
         unsafe { libc::close(self.fd) };
     }
 }
+
+// add this at the top with the other use statements
+use libc::{fcntl, F_GETFL, F_SETFL, O_NONBLOCK};
+// fcntl  read and modify  settings or fd.
+// The name fcntl literally means "file control". Same pattern as epoll_ctl
+// F_GETFL  →  GET the FLags currently set on this fd
+// F_SETFL  →  SET the FLags on this fd
+pub fn set_nonblocking(fd: RawFd) -> Result<(), std::io::Error> {
+    let flags = unsafe { fcntl(fd, F_GETFL, 0) };// step 1: read current flags
+    if flags < 0 {
+        return Err(std::io::Error::last_os_error());
+    }
+
+    let result = unsafe { fcntl(fd, F_SETFL, flags | O_NONBLOCK) }; // step 2: write them back with O_NONBLOCK added
+    if result < 0 {
+        return Err(std::io::Error::last_os_error());
+    }
+
+    Ok(())
+}
