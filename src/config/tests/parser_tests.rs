@@ -109,3 +109,21 @@ fn test_server_addr() {
     let config = parse(input).expect("should parse");
     assert_eq!(config.servers[0].addr(), "127.0.0.1:8080");
 }
+
+#[test]
+fn test_location_root() {
+    let input = r#"
+        server {
+            host 127.0.0.1;
+            port 8080;
+            location / {
+                root ./www;
+                methods GET;
+            }
+        }
+    "#;
+    let config = parse(input).expect("should parse");
+    let loc = &config.servers[0].locations[0];
+    assert_eq!(loc.path, "/");
+    assert_eq!(loc.root, "./www");
+}
