@@ -119,3 +119,42 @@ fn test_location_block_tokens() {
         ]
     );
 }
+
+
+#[test]
+fn test_multiple_methods_tokens() {
+    let input = "methods GET POST DELETE;";
+    let tokens = tokenize(input);
+    assert_eq!(tokens, vec![
+        Token::Word("methods".to_string()),
+        Token::Word("GET".to_string()),
+        Token::Word("POST".to_string()),
+        Token::Word("DELETE".to_string()),
+        Token::Semicolon,
+    ]);
+}
+
+
+#[test]
+fn test_error_page_tokens() {
+    let input = "error_page 404 ./error_pages/404.html;";
+    let tokens = tokenize(input);
+    assert_eq!(tokens, vec![
+        Token::Word("error_page".to_string()),
+        Token::Word("404".to_string()),
+        Token::Word("./error_pages/404.html".to_string()),
+        Token::Semicolon,
+    ]);
+}
+
+#[test]
+fn test_path_with_slash_is_single_token() {
+    let tokens = tokenize("/images");
+    assert_eq!(tokens, vec![Token::Word("/images".to_string())]);
+}
+
+#[test]
+fn test_relative_path_is_single_token() {
+    let tokens = tokenize("./www/images");
+    assert_eq!(tokens, vec![Token::Word("./www/images".to_string())]);
+}
