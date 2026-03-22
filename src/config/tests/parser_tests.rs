@@ -238,3 +238,98 @@ fn test_full_config_file() {
         result
     );
 }
+
+// ── Error cases ───────────────────────────────────────────────────────────────
+
+#[test]
+fn test_empty_config_fails() {
+    let result = parse("");
+    assert!(result.is_err());
+    assert!(result.unwrap_err().message.contains("at least one server"));
+}
+
+#[test]
+fn test_missing_host_fails() {
+    let input = r#"server { port 8080; }"#;
+    let result = parse(input);
+    assert!(result.is_err());
+    assert!(result.unwrap_err().message.contains("host"));
+}
+
+#[test]
+fn test_missing_port_fails() {
+    let input = r#"server { host 127.0.0.1; }"#;
+    let result = parse(input);
+    assert!(result.is_err());
+    assert!(result.unwrap_err().message.contains("port"));
+}
+
+#[test]
+fn test_invalid_port_fails() {
+    let input = r#"server { host 127.0.0.1; port banana; }"#;
+    let result = parse(input);
+    assert!(result.is_err());
+    assert!(result.unwrap_err().message.contains("port"));
+}
+
+#[test]
+fn test_unknown_server_directive_fails() {
+    let input = r#"server { host 127.0.0.1; port 8080; unknown_thing on; }"#;
+    let result = parse(input);
+    assert!(result.is_err());
+    assert!(result.unwrap_err().message.contains("unknown_thing"));
+}
+
+#[test]
+fn test_unknown_location_directive_fails() {
+    let input = r#"
+        server {
+            host 127.0.0.1; port 8080;
+            location / { root ./www; banana on; }
+        }
+    "#;
+    let result = parse(input);
+    assert!(result.is_err());
+    assert!(result.unwrap_err().message.contains("banana"));
+}
+
+#[test]
+fn test_invalid_method_fails() {
+    let input = r#"
+        server {
+            host 127.0.0.1; port 8080;
+            location / { root ./www; methods GET PATCH; }
+        }
+    "#;
+    let result = parse(input);
+    assert!(result.is_err());
+    assert!(result.unwrap_err().message.contains("PATCH"));
+}
+
+#[test]
+fn test_invalid_autoindex_value_fails() {
+    let input = r#"
+        server {
+            host 127.0.0.1; port 8080;
+            location / { root ./www; autoindex yes; }
+        }
+    "#;
+    let result = parse(input);
+    assert!(result.is_err());
+    assert!(result.unwrap_err().message.contains("autoindex"));
+}
+
+#[test]
+fn test_unknown_top_level_directive_fails() {
+    let input = r#"banana { }"#;
+    let result = parse(input);
+    assert!(result.is_err());
+    assert!(result.unwrap_err().message.contains("banana"));
+}
+
+#[test]
+fn test_unclosed_server_block_fails() {
+    let input = r#"server { host 127.0.0.1; port 8080;"#;
+    let result = parse(input);
+    assert!(result.is_err());
+}
