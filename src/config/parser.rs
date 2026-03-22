@@ -1,5 +1,5 @@
 use super::errors::{ParseError, ParseResult};
-use super::tokenizer::Token;
+use super::tokenizer::{Token, TokenKind};
 use super::{CGI, Location, Method, ServerConfig, parse_body_size};
 use std::collections::HashMap;
 use std::str::FromStr;
@@ -31,26 +31,29 @@ impl Parser {
     // Consume the next token and return it if it's a Word, else error
     fn expect_word(&mut self) -> ParseResult<String> {
         match self.next() {
-            Some(Token::Word(w)) => Ok(w),
-            Some(other) => Err(ParseError::new(
+            Some(Token {
+                kind: TokenKind::Word(w),
+                ..
+            }) => Ok(w),
+            Some(Token { kind: other, line }) => Err(ParseError::new(
                 format!("Expected a value, got {:?}", other),
-                self.pos,
+                line,
             )),
-            None => Err(ParseError::new("Unexpected end of config", self.pos)),
+            None => Err(ParseError::new("Unexpected end of config", 0)),
         }
     }
 
     // Consume the next token and verify it matches what we expect
-    fn expect(&mut self, expected: Token) -> ParseResult<()> {
+    fn expect(&mut self, expected: TokenKind) -> ParseResult<()> {
         match self.next() {
-            Some(tok) if tok == expected => Ok(()),
-            Some(other) => Err(ParseError::new(
+            Some(Token { kind, .. }) if kind == expected => Ok(()),
+            Some(Token { kind: other, line }) => Err(ParseError::new(
                 format!("Expected {:?}, got {:?}", expected, other),
-                self.pos,
+                line,
             )),
             None => Err(ParseError::new(
                 format!("Expected {:?} but reached end of config", expected),
-                self.pos,
+                0,
             )),
         }
     }
@@ -83,7 +86,7 @@ impl Parser {
     // ── Server block ──────────────────────────────────────────────────────
 
     fn parse_server(&mut self) -> ParseResult<ServerConfig> {
-        self.expect(Token::LBrace)?;
+        self.expect(TokenKind::LBrace)?;
 
         let mut host = None;
         let mut port = None;
@@ -93,31 +96,31 @@ impl Parser {
         let mut closed = false;
 
         while let Some(tok) = self.peek() {
-            match tok {
-                Token::RBrace => {
+            match tok.clone().kind {
+                TokenKind::RBrace => {
                     self.next();
                     closed = true;
                     break;
                 }
-                Token::Word(_) => {
+                TokenKind::Word(_) => {
                     let directive = self.expect_word()?;
                     match directive.as_str() {
                         "host" => {
                             host = Some(self.expect_word()?);
-                            self.expect(Token::Semicolon)?;
+                            self.expect(TokenKind::Semicolon)?;
                         }
                         "port" => {
                             let raw = self.expect_word()?;
                             port = Some(u16::from_str(&raw).map_err(|_| {
                                 ParseError::new(format!("Invalid port number '{}'", raw), self.pos)
                             })?);
-                            self.expect(Token::Semicolon)?;
+                            self.expect(TokenKind::Semicolon)?;
                         }
                         "client_max_body_size" => {
                             let raw = self.expect_word()?;
                             client_max_body_size =
                                 parse_body_size(&raw).map_err(|e| ParseError::new(e, self.pos))?;
-                            self.expect(Token::Semicolon)?;
+                            self.expect(TokenKind::Semicolon)?;
                         }
                         "error_page" => {
                             let code_str = self.expect_word()?;
@@ -129,7 +132,7 @@ impl Parser {
                             })?;
                             let path = self.expect_word()?;
                             error_pages.insert(code, path);
-                            self.expect(Token::Semicolon)?;
+                            self.expect(TokenKind::Semicolon)?;
                         }
                         "location" => {
                             locations.push(self.parse_location()?);
@@ -174,7 +177,7 @@ impl Parser {
 
     fn parse_location(&mut self) -> ParseResult<Location> {
         let path = self.expect_word()?;
-        self.expect(Token::LBrace)?;
+        self.expect(TokenKind::LBrace)?;
 
         let mut root = String::new();
         let mut index = None;
@@ -185,26 +188,30 @@ impl Parser {
         let mut closed = false;
 
         while let Some(tok) = self.peek() {
-            match tok {
-                Token::RBrace => {
+            match tok.clone().kind {
+                TokenKind::RBrace => {
                     self.next();
                     closed = true;
                     break;
                 }
-                Token::Word(_) => {
+                TokenKind::Word(_) => {
                     let directive = self.expect_word()?;
                     match directive.as_str() {
                         "root" => {
                             root = self.expect_word()?;
-                            self.expect(Token::Semicolon)?;
+                            self.expect(TokenKind::Semicolon)?;
                         }
                         "index" => {
                             index = Some(self.expect_word()?);
-                            self.expect(Token::Semicolon)?;
+                            self.expect(TokenKind::Semicolon)?;
                         }
                         "methods" => {
                             // Read all method words until we hit a semicolon
-                            while let Some(Token::Word(_)) = self.peek() {
+                            while let Some(Token {
+                                kind: TokenKind::Word(_),
+                                ..
+                            }) = self.peek()
+                            {
                                 let m = self.expect_word()?;
                                 let method = match m.as_str() {
                                     "GET" => Method::Get,
@@ -219,7 +226,7 @@ impl Parser {
                                 };
                                 methods.push(method);
                             }
-                            self.expect(Token::Semicolon)?;
+                            self.expect(TokenKind::Semicolon)?;
                         }
                         "autoindex" => {
                             let val = self.expect_word()?;
@@ -233,11 +240,11 @@ impl Parser {
                                     ));
                                 }
                             };
-                            self.expect(Token::Semicolon)?;
+                            self.expect(TokenKind::Semicolon)?;
                         }
                         "redirect" => {
                             redirect = Some(self.expect_word()?);
-                            self.expect(Token::Semicolon)?;
+                            self.expect(TokenKind::Semicolon)?;
                         }
                         // optional runner
                         "cgi" => {
@@ -245,7 +252,10 @@ impl Parser {
 
                             // Interpreter is optional — peek to see if next token is a word
                             let interpreter = match self.peek() {
-                                Some(Token::Word(_)) => self.expect_word()?,
+                                Some(Token {
+                                    kind: TokenKind::Word(_),
+                                    ..
+                                }) => self.expect_word()?,
                                 _ => {
                                     // Default interpreter based on extension
                                     match ext.as_str() {
@@ -260,7 +270,7 @@ impl Parser {
                                 extension: ext,
                                 interpreter,
                             });
-                            self.expect(Token::Semicolon)?;
+                            self.expect(TokenKind::Semicolon)?;
                         }
                         // strictly requiring a runner
                         // "cgi" => {
@@ -270,7 +280,7 @@ impl Parser {
                         //         extension: ext,
                         //         interpreter,
                         //     });
-                        //     self.expect(Token::Semicolon)?;
+                        //     self.expect(TokenKind::Semicolon)?;
                         // }
                         other => {
                             return Err(ParseError::new(
