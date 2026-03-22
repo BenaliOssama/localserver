@@ -19,7 +19,7 @@ impl std::fmt::Display for ParseError {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         write!(
             f,
-            "Config parse error at token {}: {}",
+            "Config parse error at line {}: {}",
             self.line, self.message
         )
     }

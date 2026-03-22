@@ -1,5 +1,11 @@
 #[derive(Debug, Clone, PartialEq)]
-pub enum Token {
+pub struct Token {
+    pub kind: TokenKind,
+    pub line: usize,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum TokenKind {
     Word(String),
     LBrace,
     RBrace,
@@ -9,35 +15,51 @@ pub enum Token {
 pub fn tokenize(input: &str) -> Vec<Token> {
     let mut tokens = Vec::new();
     let mut current = String::new();
+    let mut line = 1usize;
 
     for c in input.chars() {
         match c {
+            '\n' => {
+                push_word(&mut tokens, &mut current, line);
+                line += 1;
+            }
             '{' => {
-                push_word(&mut tokens, &mut current);
-                tokens.push(Token::LBrace);
+                push_word(&mut tokens, &mut current, line);
+                tokens.push(Token {
+                    kind: TokenKind::LBrace,
+                    line,
+                });
             }
             '}' => {
-                push_word(&mut tokens, &mut current);
-                tokens.push(Token::RBrace);
+                push_word(&mut tokens, &mut current, line);
+                tokens.push(Token {
+                    kind: TokenKind::RBrace,
+                    line,
+                });
             }
             ';' => {
-                push_word(&mut tokens, &mut current);
-                tokens.push(Token::Semicolon);
+                push_word(&mut tokens, &mut current, line);
+                tokens.push(Token {
+                    kind: TokenKind::Semicolon,
+                    line,
+                });
             }
             c if c.is_whitespace() => {
-                push_word(&mut tokens, &mut current);
+                push_word(&mut tokens, &mut current, line);
             }
             _ => current.push(c),
         }
     }
-
-    push_word(&mut tokens, &mut current);
+    push_word(&mut tokens, &mut current, line);
     tokens
 }
 
-fn push_word(tokens: &mut Vec<Token>, current: &mut String) {
+fn push_word(tokens: &mut Vec<Token>, current: &mut String, line: usize) {
     if !current.is_empty() {
-        tokens.push(Token::Word(current.clone()));
+        tokens.push(Token {
+            kind: TokenKind::Word(current.clone()),
+            line,
+        });
         current.clear();
     }
 }
