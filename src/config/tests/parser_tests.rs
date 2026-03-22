@@ -227,3 +227,14 @@ fn test_location_cgi() {
     assert_eq!(cgi.extension, ".py");
     assert_eq!(cgi.interpreter, "python3");
 }
+
+#[test]
+fn test_full_config_file() {
+    let input = std::fs::read_to_string("config.conf").expect("config.conf must exist");
+    let result = parse(&input);
+    assert!(
+        result.is_ok(),
+        "config.conf should parse cleanly: {:?}",
+        result
+    );
+}
