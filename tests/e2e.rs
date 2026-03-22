@@ -5,20 +5,44 @@ use std::thread;
 use std::time::Duration;
 
 // ── Helper: spin up a real server on a random port ────────────────────────────
-
 fn start_server() -> u16 {
-    // Bind to port 0 to get a random available port from the OS
+    use localserver::config::{Location, Method, ServerConfig};
+
     let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let port = listener.local_addr().unwrap().port();
-    drop(listener); // free it — server will rebind immediately
+    drop(listener);
+
+    let config = ServerConfig {
+        host: "127.0.0.1".to_string(),
+        port,
+        client_max_body_size: 1024 * 1024,
+        error_pages: std::collections::HashMap::new(),
+        locations: vec![
+            Location {
+                path: "/".to_string(),
+                root: "./www".to_string(),
+                index: Some("index.html".to_string()),
+                methods: vec![], // empty = allow all
+                autoindex: false,
+                redirect: None,
+                cgi: None,
+            },
+            Location {
+                path: "/uploads".to_string(),
+                root: "./www".to_string(),
+                index: None,
+                methods: vec![Method::Get, Method::Post, Method::Delete],
+                autoindex: false,
+                redirect: None,
+                cgi: None,
+            },
+        ],
+    };
 
     thread::spawn(move || {
-        localserver::server::Server::new(&format!("127.0.0.1:{}", port))
-            .run()
-            .unwrap();
+        localserver::server::Server::new(config).run().unwrap();
     });
 
-    // Give the server a moment to start
     thread::sleep(Duration::from_millis(100));
     port
 }
@@ -261,9 +285,7 @@ fn e2e_handles_concurrent_connections() {
         })
     }).collect();
 
-    let results: Vec<bool> = handles.into_iter()
-        .map(|h| h.join().unwrap())
-        .collect();
+    let results: Vec<bool> = handles.into_iter().map(|h| h.join().unwrap()).collect();
 
     // Every single request must have succeeded
     assert!(results.iter().all(|&ok| ok));
@@ -279,8 +301,9 @@ fn e2e_server_survives_multiple_bad_requests() {
     }
 
     // Server must still be alive
-    let response = send_request(port,
-        "GET / HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n"
+    let response = send_request(
+        port,
+        "GET / HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n",
     );
     assert!(!response.is_empty());
 }

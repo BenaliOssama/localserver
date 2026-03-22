@@ -1,61 +1,52 @@
 // src/server.rs
 
-use crate::epoll::{Epoll, MAX_EVENTS, set_nonblocking};
-use crate::handler;
-use crate::request::Request;
-use crate::response::{Response, StatusCode};
 use libc::epoll_event;
 use std::collections::HashMap;
-use std::io::Read;
+use std::io::{Read, Write};
 use std::net::TcpListener;
 use std::os::unix::io::AsRawFd;
 use std::time::Instant;
 
+use crate::config::ServerConfig;
+use crate::epoll::{Epoll, MAX_EVENTS, set_nonblocking};
+use crate::handler;
+use crate::request::Request;
+use crate::response::{Response, StatusCode};
+
 pub struct Server {
-    addr: String,
+    config: ServerConfig,
 }
 
 impl Server {
-    pub fn new(addr: &str) -> Server {
-        Server {
-            addr: addr.to_string(),
-        }
+    pub fn new(config: ServerConfig) -> Server {
+        Server { config }
     }
+
     pub fn run(&self) -> Result<(), Box<dyn std::error::Error>> {
-        //  ___ Set up the listening socket ____________
-        let listener = TcpListener::bind(&self.addr)?;
-        println!("{:?}", listener);
-
+        let listener = TcpListener::bind(self.config.addr())?;
         set_nonblocking(listener.as_raw_fd())?;
-        println!("Server listening on http://{}", self.addr);
+        println!("Server listening on http://{}", self.config.addr());
 
-        //  Create epoll and register the listening socket __
         let epoll = Epoll::new()?;
         epoll.add(listener.as_raw_fd())?;
-        println!("{:?}", epoll);
 
-        //  Buffer to store per-connection incoming data __
-        // Key = client fd, Value = bytes received so far
         let mut buffers: HashMap<i32, Vec<u8>> = HashMap::new();
         let mut connect_times: HashMap<i32, Instant> = HashMap::new();
 
-        // The event loop ─────────────────────────────────────────────
         let mut events = vec![epoll_event { events: 0, u64: 0 }; MAX_EVENTS];
 
         const TIMEOUT_SECS: u64 = 30;
 
         loop {
             let ready = epoll.wait(&mut events, 1000)?;
-            // ── Check for timed out connections ──────────────────────────────
-            let now = Instant::now();
-            let mut timed_out: Vec<i32> = Vec::new();
 
-            for (fd, connect_time) in connect_times.iter() {
-                let elapsed = now.duration_since(*connect_time).as_secs();
-                if elapsed > TIMEOUT_SECS {
-                    timed_out.push(*fd);
-                }
-            }
+            // ── Timeout check ─────────────────────────────────────────────
+            let now = Instant::now();
+            let timed_out: Vec<i32> = connect_times
+                .iter()
+                .filter(|(_, t)| now.duration_since(**t).as_secs() > TIMEOUT_SECS)
+                .map(|(fd, _)| *fd)
+                .collect();
 
             for fd in timed_out {
                 eprintln!("Connection {} timed out", fd);
@@ -64,6 +55,7 @@ impl Server {
                 connect_times.remove(&fd);
                 unsafe { libc::close(fd) };
             }
+
             // ── Handle ready events ───────────────────────────────────────
             for i in 0..ready {
                 let fd = events[i].u64 as i32;
@@ -72,7 +64,7 @@ impl Server {
                     self.accept_connections(&listener, &epoll, &mut buffers, &mut connect_times)?;
                 } else {
                     self.handle_client(fd, &epoll, &mut buffers);
-                    connect_times.remove(&fd); // ← remove when connection is handled
+                    connect_times.remove(&fd);
                 }
             }
         }
@@ -85,32 +77,18 @@ impl Server {
         buffers: &mut HashMap<i32, Vec<u8>>,
         connect_times: &mut HashMap<i32, Instant>,
     ) -> Result<(), Box<dyn std::error::Error>> {
-        println!("accepting connection");
-        // With edge-triggered we must accept in a loop until WouldBlock
         loop {
             match listener.accept() {
                 Ok((stream, addr)) => {
-                    // stream --> the connection socket
-                    println!("New connection: {}", addr);
+                    println!("[{}] New connection: {}", self.config.addr(), addr);
                     let fd = stream.as_raw_fd();
-
-                    // Set non-blocking BEFORE adding to epoll
                     set_nonblocking(fd)?;
                     epoll.add(fd)?;
-
-                    // Initialize an empty buffer for this client
                     buffers.insert(fd, Vec::new());
-                    // time of registration
                     connect_times.insert(fd, Instant::now());
-                    // Prevent Rust from closing the socket when
-                    // stream drops at end of this block
                     std::mem::forget(stream);
                 }
-
-                Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
-                    // No more incoming connections right now — stop looping
-                    break;
-                }
+                Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => break,
                 Err(e) => {
                     eprintln!("Accept error: {}", e);
                     break;
@@ -119,6 +97,7 @@ impl Server {
         }
         Ok(())
     }
+
     fn handle_client(&self, fd: i32, epoll: &Epoll, buffers: &mut HashMap<i32, Vec<u8>>) {
         let mut buf = [0u8; 4096];
         let mut stream = unsafe {
@@ -126,51 +105,59 @@ impl Server {
             std::net::TcpStream::from_raw_fd(fd)
         };
 
-        // ── Read loop — drain the entire buffer ───────────────────────────
+        // ── Drain the socket ──────────────────────────────────────────────
         loop {
             match stream.read(&mut buf) {
                 Ok(0) => {
-                    // Client disconnected
                     println!("Client {} disconnected", fd);
                     let _ = epoll.remove(fd);
                     buffers.remove(&fd);
+                    std::mem::forget(stream);
                     return;
                 }
                 Ok(n) => {
-                    // Append new bytes to this client's buffer
                     if let Some(buffer) = buffers.get_mut(&fd) {
                         buffer.extend_from_slice(&buf[..n]);
                     }
                 }
-                Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
-                    // Buffer fully drained — now process what we have
-                    break;
-                }
+                Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => break,
                 Err(e) => {
                     eprintln!("Read error on fd {}: {}", fd, e);
                     let _ = epoll.remove(fd);
                     buffers.remove(&fd);
+                    std::mem::forget(stream);
                     return;
                 }
             }
         }
-        // ── Process the request ───────────────────────────────────────────
+
+        // ── Check body size limit ─────────────────────────────────────────
+        if let Some(data) = buffers.get(&fd) {
+            if data.len() > self.config.client_max_body_size {
+                eprintln!("Client {} exceeded max body size", fd);
+                Response::error(StatusCode::ContentTooLarge).send(&mut stream);
+                let _ = epoll.remove(fd);
+                buffers.remove(&fd);
+                std::mem::forget(stream);
+                return;
+            }
+        }
+
+        // ── Parse and handle ──────────────────────────────────────────────
         if let Some(data) = buffers.get(&fd) {
             match Request::parse(data) {
                 Some(req) => {
-                    println!("Method: {:?}, Path: {}", req.method, req.path);
-                    handler::handle(req, &mut stream);
+                    println!("[{}] {:?} {}", self.config.addr(), req.method, req.path);
+                    handler::handle(req, &mut stream, &self.config);
                 }
                 None => {
                     Response::error(StatusCode::BadRequest).send(&mut stream);
                 }
             }
         }
-        // ── Clean up after responding ─────────────────────────────────────
+
         let _ = epoll.remove(fd);
         buffers.remove(&fd);
-
-        // Prevent double-close — we'll manage this fd manually
         std::mem::forget(stream);
     }
 }

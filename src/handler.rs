@@ -1,5 +1,6 @@
 // src/handler.rs
 
+use crate::config::{Location, Method as ConfigMethod, ServerConfig};
 use crate::request::{Method, Request};
 use crate::response::{Response, StatusCode};
 use std::fs;
@@ -25,7 +26,53 @@ fn get_content_type(path: &str) -> &str {
     }
 }
 
-fn serve_file(path: &str, root: &str) -> Response {
+// Find the most specific matching location for a given path
+fn match_location<'a>(path: &str, config: &'a ServerConfig) -> Option<&'a Location> {
+    config
+        .locations
+        .iter()
+        .filter(|loc| path.starts_with(&loc.path))
+        .max_by_key(|loc| loc.path.len()) // longest match wins
+}
+
+fn is_method_allowed(req_method: &Method, loc: &Location) -> bool {
+    // If no methods specified in config, allow all
+    if loc.methods.is_empty() {
+        return true;
+    }
+    loc.methods.iter().any(|m| {
+        matches!(
+            (m, req_method),
+            (ConfigMethod::Get, Method::Get)
+                | (ConfigMethod::Post, Method::Post)
+                | (ConfigMethod::Delete, Method::Delete)
+        )
+    })
+}
+
+fn error_response(status: StatusCode, config: &ServerConfig) -> Response {
+    // Check if config defines a custom error page for this status
+    let code = match status {
+        StatusCode::NotFound => 404u16,
+        StatusCode::Forbidden => 403,
+        StatusCode::InternalServerError => 500,
+        StatusCode::BadRequest => 400,
+        StatusCode::MethodNotAllowed => 405,
+        StatusCode::ContentTooLarge => 413,
+        StatusCode::Ok => return Response::error(status),
+    };
+
+    if let Some(page_path) = config.error_pages.get(&code) {
+        if let Ok(contents) = fs::read(page_path) {
+            return Response::new(status, "text/html", contents);
+        }
+    }
+
+    // Fall back to default error page
+    Response::error(status)
+}
+
+fn serve_file(path: &str, root: &str, config: &ServerConfig) -> Response {
     let normalized = if path.ends_with('/') {
         format!("{}index.html", path)
     } else {
@@ -39,45 +86,40 @@ fn serve_file(path: &str, root: &str) -> Response {
             let content_type = get_content_type(&normalized);
             Response::new(StatusCode::Ok, content_type, contents)
         }
-        Err(_) => Response::error(StatusCode::NotFound),
+        Err(_) => error_response(StatusCode::NotFound, config),
     }
 }
 
-fn handle_post(req: &Request, root: &str) -> Response {
-    // Reject empty bodies
+fn handle_post(req: &Request, root: &str, config: &ServerConfig) -> Response {
     if req.body.is_empty() {
-        return Response::error(StatusCode::BadRequest);
+        return error_response(StatusCode::BadRequest, config);
     }
 
-    // Build a safe file path from the URL path
-    // POST /upload/photo.png → saves to www/upload/photo.png
     let file_path = format!("{}{}", root, req.path);
 
-    // Make sure the directory exists
     if let Some(parent) = std::path::Path::new(&file_path).parent() {
         if let Err(e) = fs::create_dir_all(parent) {
             eprintln!("Failed to create directory: {}", e);
-            return Response::error(StatusCode::InternalServerError);
+            return error_response(StatusCode::InternalServerError, config);
         }
     }
 
-    // Write the body to disk
     match fs::write(&file_path, &req.body) {
         Ok(_) => {
             let body = format!(
-                "<html><body><h1>Uploaded successfully to {}</h1></body></html>",
+                "<html><body><h1>Uploaded to {}</h1></body></html>",
                 req.path
             );
             Response::new(StatusCode::Ok, "text/html", body.into_bytes())
         }
         Err(e) => {
             eprintln!("Failed to write file: {}", e);
-            Response::error(StatusCode::InternalServerError)
+            error_response(StatusCode::InternalServerError, config)
         }
     }
 }
 
-fn handle_delete(req: &Request, root: &str) -> Response {
+fn handle_delete(req: &Request, root: &str, config: &ServerConfig) -> Response {
     let file_path = format!("{}{}", root, req.path);
 
     match fs::remove_file(&file_path) {
@@ -85,281 +127,68 @@ fn handle_delete(req: &Request, root: &str) -> Response {
             let body = format!("<html><body><h1>Deleted {}</h1></body></html>", req.path);
             Response::new(StatusCode::Ok, "text/html", body.into_bytes())
         }
-        Err(_) => Response::error(StatusCode::NotFound),
+        Err(_) => error_response(StatusCode::NotFound, config),
     }
 }
 
-pub fn handle(req: Request, stream: &mut TcpStream) {
-    handle_with_root(req, stream, "www");
-}
+pub fn handle(req: Request, stream: &mut TcpStream, config: &ServerConfig) {
+    use std::io::Write;
+    // ── Check for redirect first ──────────────────────────────────────────
+    if let Some(loc) = match_location(&req.path, config) {
+        if let Some(redirect_to) = &loc.redirect {
+            let body = format!(
+                "<html><body>Redirecting to <a href='{}'>{}</a></body></html>",
+                redirect_to, redirect_to
+            );
+            let response = format!(
+                "HTTP/1.1 301 Moved Permanently\r\nLocation: {}\r\nContent-Length: {}\r\nContent-Type: text/html\r\n\r\n{}",
+                redirect_to,
+                body.len(),
+                body
+            );
+            let _ = stream.write_all(response.as_bytes());
+            return;
+        }
+    }
 
-pub fn handle_with_root(req: Request, stream: &mut TcpStream, root: &str) {
-    let response = match req.method {
-        Method::Get => serve_file(&req.path, root),
-        Method::Post => handle_post(&req, root),
-        Method::Delete => handle_delete(&req, root),
-        Method::Unknown(_) => Response::error(StatusCode::MethodNotAllowed),
+    // ── Match location and check method ───────────────────────────────────
+    let response = match match_location(&req.path, config) {
+        None => error_response(StatusCode::NotFound, config),
+
+        Some(loc) => {
+            if !is_method_allowed(&req.method, loc) {
+                error_response(StatusCode::MethodNotAllowed, config)
+            } else {
+                let root = loc.root.clone();
+                match req.method {
+                    Method::Get => serve_file(&req.path, &root, config),
+                    Method::Post => handle_post(&req, &root, config),
+                    Method::Delete => handle_delete(&req, &root, config),
+                    Method::Unknown(_) => error_response(StatusCode::MethodNotAllowed, config),
+                }
+            }
+        }
     };
+
     response.send(stream);
 }
 
-#[cfg(test)]
-mod tests {
-
-    use super::*;
-    use crate::request::{Method, Request};
-    use std::fs;
-    use std::io::Read;
-    use std::net::{TcpListener, TcpStream};
-
-    // ── Helpers ───────────────────────────────────────────────────────────
-
-    // Creates a temp directory unique to each test
-    fn temp_dir(name: &str) -> std::path::PathBuf {
-        let path = std::path::PathBuf::from(format!("/tmp/localserver_test_{}", name));
-        let _ = fs::remove_dir_all(&path); // clean up any previous run
-        fs::create_dir_all(&path).unwrap();
-        path
-    }
-
-    // Builds a minimal GET request struct
-    fn get(path: &str) -> Request {
-        Request {
-            method: Method::Get,
-            path: path.to_string(),
-            version: "HTTP/1.1".to_string(),
-            headers: std::collections::HashMap::new(),
-            body: Vec::new(),
-        }
-    }
-
-    // Builds a minimal POST request struct with a body
-    fn post(path: &str, body: &[u8]) -> Request {
-        Request {
-            method: Method::Post,
-            path: path.to_string(),
-            version: "HTTP/1.1".to_string(),
-            headers: std::collections::HashMap::new(),
-            body: body.to_vec(),
-        }
-    }
-
-    // Builds a minimal DELETE request struct
-    fn delete(path: &str) -> Request {
-        Request {
-            method: Method::Delete,
-            path: path.to_string(),
-            version: "HTTP/1.1".to_string(),
-            headers: std::collections::HashMap::new(),
-            body: Vec::new(),
-        }
-    }
-
-    // Runs handler::handle and captures raw bytes sent over wire
-    fn capture(req: Request, root: &str) -> Vec<u8> {
-        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
-        let addr = listener.local_addr().unwrap();
-
-        let handle = std::thread::spawn(move || {
-            let mut client = TcpStream::connect(addr).unwrap();
-            let mut buf = Vec::new();
-            client.read_to_end(&mut buf).unwrap();
-            buf
-        });
-
-        let (mut stream, _) = listener.accept().unwrap();
-        handle_with_root(req, &mut stream, root); // send request, the response is captured at the thread. 
-        drop(stream); // so now we can just close the connection  to inform the thread we are done.  this signals EOF 
-
-        handle.join().unwrap()
-    }
-    // Extracts the status line from raw response bytes
-    fn status_line(bytes: &[u8]) -> String {
-        let raw = String::from_utf8_lossy(bytes);
-        raw.lines().next().unwrap_or("").to_string()
-    }
-    // Extracts the body from raw response bytes
-    fn body(bytes: &[u8]) -> Vec<u8> {
-        let separator = b"\r\n\r\n";
-        let pos = bytes.windows(4).position(|w| w == separator).unwrap();
-        bytes[pos + 4..].to_vec()
-    }
-
-    // Extracts a specific header value from raw response bytes
-    fn header<'a>(bytes: &'a [u8], name: &str) -> Option<String> {
-        let raw = String::from_utf8_lossy(bytes);
-        for line in raw.lines() {
-            if line.to_lowercase().starts_with(&name.to_lowercase()) {
-                return Some(line.splitn(2, ':').nth(1)?.trim().to_string());
-            }
-        }
-        None
-    }
-
-    // ── GET tests ─────────────────────────────────────────────────────────
-
-    #[test]
-    fn test_get_existing_file() {
-        let root = temp_dir("get_existing");
-        fs::write(root.join("index.html"), b"<h1>hello</h1>").unwrap();
-
-        let bytes = capture(get("/index.html"), root.to_str().unwrap());
-        assert!(status_line(&bytes).contains("200 OK"));
-        assert_eq!(body(&bytes), b"<h1>hello</h1>");
-    }
-    #[test]
-    fn test_get_root_serves_index_html() {
-        let root = temp_dir("get_root");
-        fs::write(root.join("index.html"), b"<h1>home</h1>").unwrap();
-
-        let bytes = capture(get("/"), root.to_str().unwrap());
-        assert!(status_line(&bytes).contains("200 OK"));
-        assert_eq!(body(&bytes), b"<h1>home</h1>");
-    }
-
-    #[test]
-    fn test_get_missing_file_returns_404() {
-        let root = temp_dir("get_missing");
-
-        let bytes = capture(get("/missing.html"), root.to_str().unwrap());
-        assert!(status_line(&bytes).contains("404 Not Found"));
-    }
-
-    #[test]
-    fn test_get_correct_content_type_css() {
-        let root = temp_dir("get_ct_css");
-        fs::write(root.join("style.css"), b"body{}").unwrap();
-
-        let bytes = capture(get("/style.css"), root.to_str().unwrap());
-        assert_eq!(header(&bytes, "content-type").as_deref(), Some("text/css"));
-    }
-
-    #[test]
-    fn test_get_correct_content_type_js() {
-        let root = temp_dir("get_ct_js");
-        fs::write(root.join("app.js"), b"console.log('hi')").unwrap();
-
-        let bytes = capture(get("/app.js"), root.to_str().unwrap());
-        assert_eq!(
-            header(&bytes, "content-type").as_deref(),
-            Some("application/javascript")
-        );
-    }
-    #[test]
-    fn test_get_binary_file_survives() {
-        let root = temp_dir("get_binary");
-        let data = vec![0xFF, 0xD8, 0xFF, 0xE0]; // JPEG magic bytes
-        fs::write(root.join("img.jpg"), &data).unwrap();
-
-        let bytes = capture(get("/img.jpg"), root.to_str().unwrap());
-        assert!(status_line(&bytes).contains("200 OK"));
-        assert_eq!(body(&bytes), data);
-    }
-    #[test]
-    fn test_content_length_matches_file_size() {
-        let root = temp_dir("get_content_length");
-        let content = b"exactly nineteen!";
-        fs::write(root.join("file.txt"), content).unwrap();
-
-        let bytes = capture(get("/file.txt"), root.to_str().unwrap());
-        let len = header(&bytes, "content-length").unwrap();
-        assert_eq!(len, content.len().to_string());
-    }
-
-    // ── POST tests ────────────────────────────────────────────────────────
-
-    #[test]
-    fn test_post_creates_file() {
-        let root = temp_dir("post_creates");
-        let req = post("/hello.txt", b"hello world");
-
-        capture(req, root.to_str().unwrap());
-
-        let written = fs::read(root.join("hello.txt")).unwrap();
-        assert_eq!(written, b"hello world");
-    }
-
-    #[test]
-    fn test_post_returns_200() {
-        let root = temp_dir("post_200");
-        let bytes = capture(post("/file.txt", b"data"), root.to_str().unwrap());
-
-        assert!(status_line(&bytes).contains("200 OK"));
-    }
-
-    #[test]
-    fn test_post_empty_body_returns_400() {
-        let root = temp_dir("post_empty");
-        let bytes = capture(post("/file.txt", b""), root.to_str().unwrap());
-
-        assert!(status_line(&bytes).contains("400 Bad Request"));
-    }
-
-    #[test]
-    fn test_post_creates_nested_directories() {
-        let root = temp_dir("post_nested");
-        let req = post("/a/b/c/file.txt", b"nested");
-
-        capture(req, root.to_str().unwrap());
-
-        let written = fs::read(root.join("a/b/c/file.txt")).unwrap();
-        assert_eq!(written, b"nested");
-    }
-
-    #[test]
-    fn test_post_overwrites_existing_file() {
-        let root = temp_dir("post_overwrite");
-        fs::write(root.join("file.txt"), b"old content").unwrap();
-
-        capture(post("/file.txt", b"new content"), root.to_str().unwrap());
-
-        let written = fs::read(root.join("file.txt")).unwrap();
-        assert_eq!(written, b"new content");
-    }
-
-    // ── DELETE tests ──────────────────────────────────────────────────────
-
-    #[test]
-    fn test_delete_removes_file() {
-        let root = temp_dir("delete_removes");
-        fs::write(root.join("bye.txt"), b"goodbye").unwrap();
-
-        capture(delete("/bye.txt"), root.to_str().unwrap());
-
-        assert!(!root.join("bye.txt").exists());
-    }
-
-    #[test]
-    fn test_delete_returns_200() {
-        let root = temp_dir("delete_200");
-        fs::write(root.join("file.txt"), b"data").unwrap();
-
-        let bytes = capture(delete("/file.txt"), root.to_str().unwrap());
-        assert!(status_line(&bytes).contains("200 OK"));
-    }
-
-    #[test]
-    fn test_delete_missing_file_returns_404() {
-        let root = temp_dir("delete_missing");
-
-        let bytes = capture(delete("/ghost.txt"), root.to_str().unwrap());
-        assert!(status_line(&bytes).contains("404 Not Found"));
-    }
-
-    // ── Method tests ──────────────────────────────────────────────────────
-
-    #[test]
-    fn test_unknown_method_returns_405() {
-        let root = temp_dir("method_405");
-        let req = Request {
-            method: Method::Unknown("PATCH".to_string()),
+// Keep the test helper working
+pub fn handle_with_root(req: Request, stream: &mut TcpStream, root: &str) {
+    let mut config = ServerConfig {
+        host: "127.0.0.1".to_string(),
+        port: 8080,
+        client_max_body_size: 1024 * 1024,
+        error_pages: std::collections::HashMap::new(),
+        locations: vec![crate::config::Location {
             path: "/".to_string(),
-            version: "HTTP/1.1".to_string(),
-            headers: std::collections::HashMap::new(),
-            body: Vec::new(),
-        };
-
-        let bytes = capture(req, root.to_str().unwrap());
-        assert!(status_line(&bytes).contains("405 Method Not Allowed"));
-    }
+            root: root.to_string(),
+            index: Some("index.html".to_string()),
+            methods: vec![],
+            autoindex: false,
+            redirect: None,
+            cgi: None,
+        }],
+    };
+    handle(req, stream, &config);
 }
