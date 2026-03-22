@@ -227,15 +227,39 @@ impl Parser {
                             redirect = Some(self.expect_word()?);
                             self.expect(Token::Semicolon)?;
                         }
+                        // optional runner
                         "cgi" => {
                             let ext = self.expect_word()?;
-                            let interpreter = self.expect_word()?;
+
+                            // Interpreter is optional — peek to see if next token is a word
+                            let interpreter = match self.peek() {
+                                Some(Token::Word(_)) => self.expect_word()?,
+                                _ => {
+                                    // Default interpreter based on extension
+                                    match ext.as_str() {
+                                        ".py" => "python3".to_string(),
+                                        ".php" => "php".to_string(),
+                                        _ => "sh".to_string(),
+                                    }
+                                }
+                            };
+
                             cgi = Some(CGI {
                                 extension: ext,
                                 interpreter,
                             });
                             self.expect(Token::Semicolon)?;
                         }
+                        // strictly requiring a runner
+                        // "cgi" => {
+                        //     let ext = self.expect_word()?;
+                        //     let interpreter = self.expect_word()?;
+                        //     cgi = Some(CGI {
+                        //         extension: ext,
+                        //         interpreter,
+                        //     });
+                        //     self.expect(Token::Semicolon)?;
+                        // }
                         other => {
                             return Err(ParseError::new(
                                 format!("Unknown location directive '{}'", other),
