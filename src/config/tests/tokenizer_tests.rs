@@ -1,5 +1,12 @@
 use crate::config::tokenizer::{Token, TokenKind, tokenize};
 
+// ── Helper ────────────────────────────────────────────────────────────────────
+
+// Strip line numbers — tests only care about token kinds, not positions
+fn kinds(input: &str) -> Vec<TokenKind> {
+    tokenize(input).into_iter().map(|t| t.kind).collect()
+}
+
 // ── Basic tokens ──────────────────────────────────────────────────────────────
 
 #[test]
