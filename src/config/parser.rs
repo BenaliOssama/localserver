@@ -90,11 +90,13 @@ impl Parser {
         let mut client_max_body_size = 1024 * 1024; // default 1MB
         let mut error_pages = HashMap::new();
         let mut locations = Vec::new();
+        let mut closed = false;
 
         while let Some(tok) = self.peek() {
             match tok {
                 Token::RBrace => {
                     self.next();
+                    closed = true;
                     break;
                 }
                 Token::Word(_) => {
@@ -148,6 +150,14 @@ impl Parser {
                 }
             }
         }
+
+        // Validate block was closed
+        if !closed {
+            return Err(ParseError::new(
+                "Unclosed server block — missing '}'",
+                self.pos,
+            ));
+        }
         // Validate required fields
         let host = host.ok_or_else(|| ParseError::new("Server block missing 'host'", self.pos))?;
         let port = port.ok_or_else(|| ParseError::new("Server block missing 'port'", self.pos))?;
@@ -172,11 +182,13 @@ impl Parser {
         let mut autoindex = false;
         let mut redirect = None;
         let mut cgi = None;
+        let mut closed = false;
 
         while let Some(tok) = self.peek() {
             match tok {
                 Token::RBrace => {
                     self.next();
+                    closed = true;
                     break;
                 }
                 Token::Word(_) => {
@@ -276,7 +288,12 @@ impl Parser {
                 }
             }
         }
-
+        if !closed {
+            return Err(ParseError::new(
+                format!("Unclosed location block '{}' — missing '}}'", path),
+                self.pos,
+            ));
+        }
         // Validate — a location must have at least a path
         // root can be empty for redirect-only locations
         if path.is_empty() {
