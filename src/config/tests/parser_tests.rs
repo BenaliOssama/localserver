@@ -127,3 +127,102 @@ fn test_location_root() {
     assert_eq!(loc.path, "/");
     assert_eq!(loc.root, "./www");
 }
+
+#[test]
+fn test_location_index() {
+    let input = r#"
+        server {
+            host 127.0.0.1;
+            port 8080;
+            location / {
+                root ./www;
+                index index.html;
+                methods GET;
+            }
+        }
+    "#;
+    let config = parse(input).expect("should parse");
+    let loc = &config.servers[0].locations[0];
+    assert_eq!(loc.index.as_deref(), Some("index.html"));
+}
+
+#[test]
+fn test_location_methods_get() {
+    let input = r#"
+        server {
+            host 127.0.0.1; port 8080;
+            location / { root ./www; methods GET; }
+        }
+    "#;
+    let config = parse(input).expect("should parse");
+    let methods = &config.servers[0].locations[0].methods;
+    assert_eq!(methods.len(), 1);
+    assert!(matches!(methods[0], Method::Get));
+}
+
+#[test]
+fn test_location_multiple_methods() {
+    let input = r#"
+        server {
+            host 127.0.0.1; port 8080;
+            location /upload { root ./uploads; methods GET POST DELETE; }
+        }
+    "#;
+    let config = parse(input).expect("should parse");
+    let methods = &config.servers[0].locations[0].methods;
+    assert_eq!(methods.len(), 3);
+    assert!(matches!(methods[0], Method::Get));
+    assert!(matches!(methods[1], Method::Post));
+    assert!(matches!(methods[2], Method::Delete));
+}
+
+#[test]
+fn test_location_autoindex_on() {
+    let input = r#"
+        server {
+            host 127.0.0.1; port 8080;
+            location /files { root ./files; autoindex on; methods GET; }
+        }
+    "#;
+    let config = parse(input).expect("should parse");
+    assert!(config.servers[0].locations[0].autoindex);
+}
+
+#[test]
+fn test_location_autoindex_off() {
+    let input = r#"
+        server {
+            host 127.0.0.1; port 8080;
+            location / { root ./www; autoindex off; methods GET; }
+        }
+    "#;
+    let config = parse(input).expect("should parse");
+    assert!(!config.servers[0].locations[0].autoindex);
+}
+
+#[test]
+fn test_location_redirect() {
+    let input = r#"
+        server {
+            host 127.0.0.1; port 8080;
+            location /old { redirect /new; }
+        }
+    "#;
+    let config = parse(input).expect("should parse");
+    let loc = &config.servers[0].locations[0];
+    assert_eq!(loc.redirect.as_deref(), Some("/new"));
+}
+
+#[test]
+fn test_location_cgi() {
+    let input = r#"
+        server {
+            host 127.0.0.1; port 8080;
+            location /cgi { root ./cgi-bin; methods GET POST; cgi .py python3; }
+        }
+    "#;
+    let config = parse(input).expect("should parse");
+    let cgi = config.servers[0].locations[0].cgi.as_ref().unwrap();
+    assert_eq!(cgi.extension, ".py");
+    assert_eq!(cgi.interpreter, "python3");
+}
