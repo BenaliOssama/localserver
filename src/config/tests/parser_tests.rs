@@ -1,10 +1,11 @@
+use crate::config::errors::ParseError;
 use crate::config::parser::Parser;
 use crate::config::tokenizer::tokenize;
 use crate::config::{Config, Method};
 
 // ── Helper ────────────────────────────────────────────────────────────────────
 
-fn parse(input: &str) -> Result<Config, crate::errors::ParseError> {
+fn parse(input: &str) -> Result<Config, ParseError> {
     let tokens = tokenize(input);
     Parser::new(tokens).parse_config()
 }

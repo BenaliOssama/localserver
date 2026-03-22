@@ -1,6 +1,6 @@
+use super::errors::{ParseError, ParseResult};
 use super::tokenizer::Token;
 use super::{CGI, Location, Method, ServerConfig, parse_body_size};
-use crate::errors::{ParseError, ParseResult};
 use std::collections::HashMap;
 use std::str::FromStr;
 
