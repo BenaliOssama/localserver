@@ -72,6 +72,10 @@ fn error_response(status: StatusCode, config: &ServerConfig) -> Response {
     Response::error(status)
 }
 
+fn serve_directory(url_path: &str, dir_path: &str, config: &ServerConfig) -> Response {
+    todo!()
+}
+
 fn serve_file(path: &str, root: &str, config: &ServerConfig) -> Response {
     let normalized = if path.ends_with('/') {
         format!("{}index.html", path)
@@ -80,6 +84,15 @@ fn serve_file(path: &str, root: &str, config: &ServerConfig) -> Response {
     };
 
     let file_path = format!("{}{}", root, normalized);
+    let meta = match fs::metadata(&file_path) {
+        Ok(m) => m,
+        Err(_) => return error_response(StatusCode::NotFound, config),
+    };
+
+    // If it's a directory, hand off to directory listing
+    if meta.is_dir() {
+        return serve_directory(path, &file_path, config);
+    }
 
     match fs::read(&file_path) {
         Ok(contents) => {
