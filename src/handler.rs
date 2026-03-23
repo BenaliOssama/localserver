@@ -73,6 +73,14 @@ fn error_response(status: StatusCode, config: &ServerConfig) -> Response {
 }
 
 fn serve_directory(url_path: &str, dir_path: &str, config: &ServerConfig) -> Response {
+    // Check if autoindex is enabled for this location
+    let autoindex = config
+        .locations
+        .iter()
+        .filter(|loc| url_path.starts_with(&loc.path))
+        .max_by_key(|loc| loc.path.len()) // find the longest
+        .map(|loc| loc.autoindex)
+        .unwrap_or(false);
     todo!()
 }
 
