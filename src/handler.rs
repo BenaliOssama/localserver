@@ -78,10 +78,89 @@ fn serve_directory(url_path: &str, dir_path: &str, config: &ServerConfig) -> Res
         .locations
         .iter()
         .filter(|loc| url_path.starts_with(&loc.path))
-        .max_by_key(|loc| loc.path.len()) // find the longest
+        .max_by_key(|loc| loc.path.len())
         .map(|loc| loc.autoindex)
         .unwrap_or(false);
-    todo!()
+
+    if !autoindex {
+        return error_response(StatusCode::Forbidden, config);
+    }
+
+    // Read directory entries
+    let entries = match fs::read_dir(dir_path) {
+        Ok(e) => e,
+        Err(_) => return error_response(StatusCode::InternalServerError, config),
+    };
+
+    // Build the HTML listing
+    let mut rows = String::new();
+
+    // Add parent directory link unless we're at root
+    if url_path != "/" {
+        let parent = std::path::Path::new(url_path)
+            .parent()
+            .and_then(|p| p.to_str())
+            .unwrap_or("/");
+        rows.push_str(&format!(
+            "<tr><td><a href='{}/'>..</a></td><td>-</td><td>-</td></tr>\n",
+            parent
+        ));
+    }
+
+    // Collect and sort entries alphabetically
+    let mut entry_list: Vec<_> = entries.filter_map(|e| e.ok()).collect();
+    entry_list.sort_by_key(|e| e.file_name());
+
+    for entry in entry_list {
+        let name = entry.file_name();
+        let name_str = name.to_string_lossy();
+        let meta = match entry.metadata() {
+            Ok(m) => m,
+            Err(_) => continue,
+        };
+
+        let (display_name, size) = if meta.is_dir() {
+            (format!("{}/", name_str), "-".to_string())
+        } else {
+            (name_str.to_string(), format!("{} bytes", meta.len()))
+        };
+
+        let href = format!("{}/{}", url_path.trim_end_matches('/'), display_name);
+
+        rows.push_str(&format!(
+            "<tr><td><a href='{}'>{}</a></td><td>{}</td></tr>\n",
+            href, display_name, size
+        ));
+    }
+
+    let html = format!(
+        r#"<!DOCTYPE html>
+<html>
+<head>
+    <title>Index of {path}</title>
+    <style>
+        body  {{ font-family: monospace; padding: 2rem; }}
+        h1    {{ border-bottom: 1px solid #ccc; padding-bottom: 0.5rem; }}
+        table {{ border-collapse: collapse; width: 100%; }}
+        td    {{ padding: 0.3rem 1rem; }}
+        tr:hover {{ background: #f5f5f5; }}
+        a     {{ text-decoration: none; color: #0066cc; }}
+        a:hover {{ text-decoration: underline; }}
+    </style>
+</head>
+<body>
+    <h1>Index of {path}</h1>
+    <table>
+        <tr><th align='left'>Name</th><th align='left'>Size</th></tr>
+        {rows}
+    </table>
+</body>
+</html>"#,
+        path = url_path,
+        rows = rows
+    );
+
+    Response::new(StatusCode::Ok, "text/html", html.into_bytes())
 }
 
 fn serve_file(path: &str, root: &str, config: &ServerConfig) -> Response {
