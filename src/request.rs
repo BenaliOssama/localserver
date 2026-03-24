@@ -70,6 +70,9 @@ impl Request {
             .unwrap_or(0)
     }
 }
+fn decode_chunked(data: &[u8]) -> Option<Vec<u8>> {
+    todo!()
+}
 
 #[cfg(test)]
 mod tests {
@@ -227,11 +230,10 @@ mod tests {
         let raw = b"GET\r\n\r\n";
         assert!(Request::parse(raw).is_none());
     }
-    
+
     #[test]
     fn test_completely_garbage_input_returns_none() {
         let raw = b"GARBAGE DATA WITH NO STRUCTURE";
         assert!(Request::parse(raw).is_none());
     }
-
 }
