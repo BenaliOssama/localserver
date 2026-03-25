@@ -44,9 +44,10 @@ impl Response {
         }
     }
 
-        pub fn send(&self, stream: &mut TcpStream) {
+    pub fn send(&self, stream: &mut TcpStream) {
         // Build cookie headers
-        let cookie_headers: String = self.cookies
+        let cookie_headers: String = self
+            .cookies
             .iter()
             .map(|c| format!("Set-Cookie: {}\r\n", c))
             .collect();
@@ -56,7 +57,7 @@ impl Response {
             self.status.as_str(),
             self.content_type,
             self.body.len(),
-            cookie_headers  // ← inserted before final \r\n
+            cookie_headers // ← inserted before final \r\n
         );
 
         if let Err(e) = stream.write_all(header.as_bytes()) {
@@ -67,16 +68,16 @@ impl Response {
             eprintln!("Failed to write response body: {}", e);
         }
     }
-
-
-    pub fn error(status: StatusCode) -> Response {
-        let body = format!(
-            "<html><body><h1>{}</h1></body></html>",
-            status.as_str()
-        );
-        Response::new(status, "text/html", body.into_bytes())
+    pub fn set_cookie(mut self, name: &str, value: &str) -> Response {
+        self.cookies
+            .push(format!("{}={}; HttpOnly; SameSite=Strict", name, value));
+        self
     }
 
+    pub fn error(status: StatusCode) -> Response {
+        let body = format!("<html><body><h1>{}</h1></body></html>", status.as_str());
+        Response::new(status, "text/html", body.into_bytes())
+    }
 }
 
 #[cfg(test)]

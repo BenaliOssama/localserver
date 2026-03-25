@@ -4,6 +4,7 @@ use crate::config::{Location, Method as ConfigMethod, ServerConfig};
 use crate::request::{Method, Request};
 use crate::response::{Response, StatusCode};
 use crate::utils::session;
+use std::collections::HashMap;
 use std::fs;
 use std::net::TcpStream;
 
@@ -252,6 +253,7 @@ pub fn handle(req: Request, stream: &mut TcpStream, config: &ServerConfig) {
         }
     }
     // ── Session-aware routes ──────────────────────────────────────────────────
+    println!("looking for response");
     let response = match req.path.as_str() {
         "/login" if matches!(req.method, Method::Post) => handle_login(&req),
         "/logout" if matches!(req.method, Method::Post) => handle_logout(&req),
@@ -279,14 +281,54 @@ pub fn handle(req: Request, stream: &mut TcpStream, config: &ServerConfig) {
     response.send(stream);
 }
 fn handle_login(req: &Request) -> Response {
-    todo!()
+    println!("-----------> in the login handler");
+    // Parse body as "username=sam&password=secret"
+    let body = String::from_utf8_lossy(&req.body);
+    let mut params: HashMap<&str, &str> = HashMap::new();
+    for pair in body.split('&') {
+        if let Some((k, v)) = pair.split_once('=') {
+            params.insert(k, v);
+        }
+    }
+
+    let username = params.get("username").copied().unwrap_or("");
+    let password = params.get("password").copied().unwrap_or("");
+
+    // Hardcoded for now — replace with real auth later
+    if username == "admin" && password == "secret" {
+        let mut store = session::store().lock().unwrap();
+        let session_id = store.create();
+        store.set(&session_id, "username", username);
+
+        let body = b"<html><body><h1>Logged in!</h1></body></html>".to_vec();
+        Response::new(StatusCode::Ok, "text/html", body).set_cookie("session_id", &session_id)
+    } else {
+        let body = b"<html><body><h1>Invalid credentials</h1></body></html>".to_vec();
+        Response::new(StatusCode::Ok, "text/html", body)
+    }
 }
 
 fn handle_logout(req: &Request) -> Response {
-    todo!()
+    if let Some(id) = req.session_id() {
+        session::store().lock().unwrap().destroy(&id);
+    }
+    let body = b"<html><body><h1>Logged out</h1></body></html>".to_vec();
+    // Expire the cookie by setting max-age=0
+    Response::new(StatusCode::Ok, "text/html", body).set_cookie("session_id", "deleted; Max-Age=0")
 }
+
 fn handle_whoami(req: &Request, config: &ServerConfig) -> Response {
-    todo!()
+    let username = req
+        .session_id()
+        .and_then(|id| session::store().lock().unwrap().get_value(&id, "username"));
+
+    match username {
+        Some(name) => {
+            let body = format!("<html><body><h1>You are: {}</h1></body></html>", name);
+            Response::new(StatusCode::Ok, "text/html", body.into_bytes())
+        }
+        None => error_response(StatusCode::Forbidden, config),
+    }
 }
 // Keep the test helper working
 pub fn handle_with_root(req: Request, stream: &mut TcpStream, root: &str) {
