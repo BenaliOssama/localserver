@@ -70,8 +70,37 @@ impl Request {
             .unwrap_or(0)
     }
 }
+
 fn decode_chunked(data: &[u8]) -> Option<Vec<u8>> {
-    todo!()
+    let mut body = Vec::new();
+    let mut pos = 0;
+
+    loop {
+        // Find the end of the chunk size line (\r\n)
+        let line_end = data[pos..].windows(2).position(|w| w == b"\r\n")?;
+
+        // Parse chunk size — it's hex encoded
+        let size_str = std::str::from_utf8(&data[pos..pos + line_end]).ok()?;
+        let chunk_size = usize::from_str_radix(size_str.trim(), 16).ok()?;
+
+        pos += line_end + 2; // skip past \r\n
+
+        // Size 0 means end of body
+        if chunk_size == 0 {
+            break;
+        }
+
+        // Make sure we have enough data
+        if pos + chunk_size > data.len() {
+            return None;
+        }
+
+        // Append chunk data
+        body.extend_from_slice(&data[pos..pos + chunk_size]);
+        pos += chunk_size + 2; // skip past chunk data and its trailing \r\n
+    }
+
+    Some(body)
 }
 
 #[cfg(test)]
