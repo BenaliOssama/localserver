@@ -1,3 +1,4 @@
+pub mod cgi;
 pub mod config;
 pub mod epoll;
 pub mod handler;

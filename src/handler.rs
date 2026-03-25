@@ -1,5 +1,6 @@
 // src/handler.rs
 
+use crate::cgi::CgiRunner;
 use crate::config::{Location, Method as ConfigMethod, ServerConfig};
 use crate::request::{Method, Request};
 use crate::response::{Response, StatusCode};
@@ -267,8 +268,19 @@ pub fn handle(req: Request, stream: &mut TcpStream, config: &ServerConfig) {
                 } else {
                     let root = loc.root.clone();
                     match req.method {
-                        Method::Get => serve_file(&req.path, &root, config),
-                        Method::Post => handle_post(&req, &root, config),
+                        Method::Get | Method::Post => {
+                            if let Some(cgi) = find_cgi(&req.path, loc) {
+                                // Build the full path to the script
+                                let script = format!("{}{}", root, req.path);
+                                CgiRunner::new(&cgi.interpreter, &script).run(&req)
+                            } else {
+                                match req.method {
+                                    Method::Get => serve_file(&req.path, &root, config),
+                                    Method::Post => handle_post(&req, &root, config),
+                                    _ => unreachable!(),
+                                }
+                            }
+                        }
                         Method::Delete => handle_delete(&req, &root, config),
                         Method::Unknown(_) => error_response(StatusCode::MethodNotAllowed, config),
                     }
@@ -348,4 +360,10 @@ pub fn handle_with_root(req: Request, stream: &mut TcpStream, root: &str) {
         }],
     };
     handle(req, stream, &config);
+}
+
+fn find_cgi<'a>(path: &str, loc: &'a crate::config::Location) -> Option<&'a crate::config::CGI> {
+    loc.cgi
+        .as_ref()
+        .filter(|cgi| path.ends_with(&cgi.extension))
 }

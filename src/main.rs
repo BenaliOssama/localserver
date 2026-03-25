@@ -1,3 +1,4 @@
+mod cgi;
 mod config;
 mod epoll;
 mod handler;
