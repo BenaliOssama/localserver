@@ -1,4 +1,4 @@
-BASE_URL = http://localhost:8080
+BASE_URL = http://127.0.0.1:8080
 
 # ─── Server ───────────────────────────────────────────────────────────────────
 
@@ -56,7 +56,7 @@ test-all:
 	curl -i $(BASE_URL)/uploads/test.txt
 
 	@echo "\n========== 5. Bad request =========="
-	curl -i --http1.1 -X GARBAGE http://localhost:8080/
+	curl -i --http1.1 -X GARBAGE http://127.0.0.1:8080/
 
 	@echo "\n========== 6. Unknown method (expect 405) =========="
 	curl -i -X PATCH $(BASE_URL)/uploads/test.txt
@@ -70,19 +70,19 @@ test-all:
 
 test-login:
 	@echo "\n--- Login ---"
-	curl -i -X POST http://localhost:8080/login \
+	curl -i -X POST http://127.0.0.1:8080/login \
 		-c /tmp/cookies.txt \
 		--data "username=admin&password=secret"
 
 	@echo "\n--- Who am I? ---"
-	curl -i http://localhost:8080/whoami \
+	curl -i http://127.0.0.1:8080/whoami \
 		-b /tmp/cookies.txt
 
 	@echo "\n--- Logout ---"
-	curl -i -X POST http://localhost:8080/logout \
+	curl -i -X POST http://127.0.0.1:8080/logout \
 		-b /tmp/cookies.txt \
 		-c /tmp/cookies.txt
 
 	@echo "\n--- Who am I after logout? (expect 403) ---"
-	curl -i http://localhost:8080/whoami \
+	curl -i http://127.0.0.1:8080/whoami \
 		-b /tmp/cookies.txt
