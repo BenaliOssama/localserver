@@ -234,8 +234,18 @@ fn handle_delete(req: &Request, root: &str, config: &ServerConfig) -> Response {
     }
 }
 
-pub fn handle(req: Request, stream: &mut TcpStream, config: &ServerConfig) {
+pub fn handle(req: &mut Request, stream: &mut TcpStream, config: &ServerConfig) {
     use std::io::Write;
+    // Extract query string before stripping it from path
+    let query_string = if let Some((path, query)) = req.path.split_once('?') {
+        req.path = path.to_string();
+        query.to_string()
+    } else {
+        String::new()
+    };
+
+    req.headers
+        .insert("x-query-string".to_string(), query_string);
     // ── Check for redirect first ──────────────────────────────────────────
     if let Some(loc) = match_location(&req.path, config) {
         if let Some(redirect_to) = &loc.redirect {
@@ -271,17 +281,31 @@ pub fn handle(req: Request, stream: &mut TcpStream, config: &ServerConfig) {
                         Method::Get | Method::Post => {
                             if let Some(cgi) = find_cgi(&req.path, loc) {
                                 // Build the full path to the script
-                                let script = format!("{}{}", root, req.path);
+                                let relative = strip_location_prefix(&req.path, &loc.path);
+                                let script = format!("{}/{}", root, relative);
                                 CgiRunner::new(&cgi.interpreter, &script).run(&req)
                             } else {
                                 match req.method {
-                                    Method::Get => serve_file(&req.path, &root, config),
-                                    Method::Post => handle_post(&req, &root, config),
+                                    Method::Get => {
+                                        let relative = strip_location_prefix(&req.path, &loc.path);
+                                        serve_file(&format!("/{}", relative), &root, config)
+                                    }
+                                    Method::Post => {
+                                        let relative = strip_location_prefix(&req.path, &loc.path);
+                                        let mut adjusted = req.clone(); // requires #[derive(Clone)] on Request
+                                        adjusted.path = format!("/{}", relative);
+                                        handle_post(&adjusted, &root, config)
+                                    }
                                     _ => unreachable!(),
                                 }
                             }
                         }
-                        Method::Delete => handle_delete(&req, &root, config),
+                        Method::Delete => {
+                            let relative = strip_location_prefix(&req.path, &loc.path);
+                            let mut adjusted = req.clone();
+                            adjusted.path = format!("/{}", relative);
+                            handle_delete(&adjusted, &root, config)
+                        }
                         Method::Unknown(_) => error_response(StatusCode::MethodNotAllowed, config),
                     }
                 }
@@ -359,11 +383,18 @@ pub fn handle_with_root(req: Request, stream: &mut TcpStream, root: &str) {
             cgi: None,
         }],
     };
-    handle(req, stream, &config);
+    handle(&mut req.clone(), stream, &config);
 }
 
 fn find_cgi<'a>(path: &str, loc: &'a crate::config::Location) -> Option<&'a crate::config::CGI> {
     loc.cgi
         .as_ref()
         .filter(|cgi| path.ends_with(&cgi.extension))
+}
+
+fn strip_location_prefix<'a>(url_path: &'a str, location_path: &str) -> &'a str {
+    url_path
+        .strip_prefix(location_path)
+        .unwrap_or(url_path)
+        .trim_start_matches('/')
 }

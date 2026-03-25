@@ -148,7 +148,7 @@ impl Server {
             match Request::parse(data) {
                 Some(req) => {
                     println!("[{}] {:?} {}", self.config.addr(), req.method, req.path);
-                    handler::handle(req, &mut stream, &self.config);
+                    handler::handle(&mut req.clone(), &mut stream, &self.config);
                 }
                 None => {
                     Response::error(StatusCode::BadRequest).send(&mut stream);

@@ -2,7 +2,7 @@
 
 use std::collections::HashMap;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum Method {
     Get,
     Post,
@@ -10,7 +10,7 @@ pub enum Method {
     Unknown(String),
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Request {
     pub method: Method,
     pub path: String,

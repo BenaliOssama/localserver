@@ -85,5 +85,16 @@ test-login:
 
 	@echo "\n--- Who am I after logout? (expect 403) ---"
 	curl -i http://127.0.0.1:8080/whoami \
-		-b /tmp/cookies.txt
+# 		-b /tmp/cookies.txt
 
+
+test-cgi:
+	@echo "\n--- GET CGI script ---"
+	curl -i http://127.0.01:8080/cgi/hello.py
+
+	@echo "\n--- POST to CGI script ---"
+	curl -i -X POST http://127.0.0.1:8080/cgi/hello.py \
+		--data "name=sam&message=hello"
+
+	@echo "\n--- CGI with query string ---"
+	curl -i "http://127.0.0.1:8080/cgi/hello.py?foo=bar&baz=qux"
