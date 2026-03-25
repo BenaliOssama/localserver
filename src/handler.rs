@@ -3,6 +3,7 @@
 use crate::config::{Location, Method as ConfigMethod, ServerConfig};
 use crate::request::{Method, Request};
 use crate::response::{Response, StatusCode};
+use crate::utils::session;
 use std::fs;
 use std::net::TcpStream;
 
@@ -250,29 +251,43 @@ pub fn handle(req: Request, stream: &mut TcpStream, config: &ServerConfig) {
             return;
         }
     }
+    // ── Session-aware routes ──────────────────────────────────────────────────
+    let response = match req.path.as_str() {
+        "/login" if matches!(req.method, Method::Post) => handle_login(&req),
+        "/logout" if matches!(req.method, Method::Post) => handle_logout(&req),
+        "/whoami" => handle_whoami(&req, config),
+        _ => match match_location(&req.path, config) {
+            None => error_response(StatusCode::NotFound, config),
 
-    // ── Match location and check method ───────────────────────────────────
-    let response = match match_location(&req.path, config) {
-        None => error_response(StatusCode::NotFound, config),
-
-        Some(loc) => {
-            if !is_method_allowed(&req.method, loc) {
-                error_response(StatusCode::MethodNotAllowed, config)
-            } else {
-                let root = loc.root.clone();
-                match req.method {
-                    Method::Get => serve_file(&req.path, &root, config),
-                    Method::Post => handle_post(&req, &root, config),
-                    Method::Delete => handle_delete(&req, &root, config),
-                    Method::Unknown(_) => error_response(StatusCode::MethodNotAllowed, config),
+            Some(loc) => {
+                if !is_method_allowed(&req.method, loc) {
+                    error_response(StatusCode::MethodNotAllowed, config)
+                } else {
+                    let root = loc.root.clone();
+                    match req.method {
+                        Method::Get => serve_file(&req.path, &root, config),
+                        Method::Post => handle_post(&req, &root, config),
+                        Method::Delete => handle_delete(&req, &root, config),
+                        Method::Unknown(_) => error_response(StatusCode::MethodNotAllowed, config),
+                    }
                 }
             }
-        }
+        }, // ← rename your existing match block
     };
+    // ── Match location and check method ───────────────────────────────────
 
     response.send(stream);
 }
+fn handle_login(req: &Request) -> Response {
+    todo!()
+}
 
+fn handle_logout(req: &Request) -> Response {
+    todo!()
+}
+fn handle_whoami(req: &Request, config: &ServerConfig) -> Response {
+    todo!()
+}
 // Keep the test helper working
 pub fn handle_with_root(req: Request, stream: &mut TcpStream, root: &str) {
     let mut config = ServerConfig {

@@ -66,3 +66,23 @@ test-all:
 	test-post \
 	test-delete test-delete-missing \
 	test-all
+
+
+test-login:
+	@echo "\n--- Login ---"
+	curl -i -X POST http://localhost:8080/login \
+		-c /tmp/cookies.txt \
+		--data "username=admin&password=secret"
+
+	@echo "\n--- Who am I? ---"
+	curl -i http://localhost:8080/whoami \
+		-b /tmp/cookies.txt
+
+	@echo "\n--- Logout ---"
+	curl -i -X POST http://localhost:8080/logout \
+		-b /tmp/cookies.txt \
+		-c /tmp/cookies.txt
+
+	@echo "\n--- Who am I after logout? (expect 403) ---"
+	curl -i http://localhost:8080/whoami \
+		-b /tmp/cookies.txt

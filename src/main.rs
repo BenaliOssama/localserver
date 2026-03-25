@@ -4,6 +4,7 @@ mod handler;
 mod request;
 mod response;
 mod server;
+mod session;
 
 use std::thread;
 
