@@ -54,6 +54,17 @@ impl Request {
             }
         }
 
+        // Check for chunked transfer encoding
+        let body = if headers
+            .get("transfer-encoding")
+            .map(|v| v.to_lowercase().contains("chunked"))
+            .unwrap_or(false)
+        {
+            // Decode chunked body — return None if malformed
+            decode_chunked(&body)?
+        } else {
+            body
+        };
         Some(Request {
             method,
             path,
@@ -61,6 +72,27 @@ impl Request {
             headers,
             body,
         })
+    }
+    pub fn cookies(&self) -> std::collections::HashMap<String, String> {
+        let mut map = std::collections::HashMap::new();
+
+        let cookie_header = match self.headers.get("cookie") {
+            Some(v) => v,
+            None => return map,
+        };
+
+        // "session_id=abc123; user=sam" → [("session_id", "abc123"), ("user", "sam")]
+        for pair in cookie_header.split(';') {
+            if let Some((key, value)) = pair.trim().split_once('=') {
+                map.insert(key.trim().to_string(), value.trim().to_string());
+            }
+        }
+
+        map
+    }
+
+    pub fn session_id(&self) -> Option<String> {
+        self.cookies().get("session_id").cloned()
     }
 
     pub fn content_length(&self) -> usize {
@@ -265,4 +297,36 @@ mod tests {
         let raw = b"GARBAGE DATA WITH NO STRUCTURE";
         assert!(Request::parse(raw).is_none());
     }
+}
+
+//_______________ test chunks reading of body ... _______________________________________
+
+#[test]
+fn test_chunked_body_decoded() {
+    // "5\r\nhello\r\n6\r\n world\r\n0\r\n\r\n"
+    let chunked_body = b"5\r\nhello\r\n6\r\n world\r\n0\r\n\r\n";
+    let decoded = decode_chunked(chunked_body).unwrap();
+    assert_eq!(decoded, b"hello world");
+}
+
+#[test]
+fn test_chunked_request_parsed() {
+    let raw = b"POST /upload HTTP/1.1\r\nHost: localhost\r\nTransfer-Encoding: chunked\r\n\r\n5\r\nhello\r\n0\r\n\r\n";
+    let req = Request::parse(raw).expect("should parse");
+    assert_eq!(req.body, b"hello");
+}
+
+#[test]
+fn test_chunked_empty_body() {
+    let raw =
+        b"POST /upload HTTP/1.1\r\nHost: localhost\r\nTransfer-Encoding: chunked\r\n\r\n0\r\n\r\n";
+    let req = Request::parse(raw).expect("should parse");
+    assert!(req.body.is_empty());
+}
+
+#[test]
+fn test_malformed_chunk_size_returns_none() {
+    // "gg" is not valid hex
+    let raw = b"POST /upload HTTP/1.1\r\nHost: localhost\r\nTransfer-Encoding: chunked\r\n\r\ngg\r\nhello\r\n0\r\n\r\n";
+    assert!(Request::parse(raw).is_none());
 }

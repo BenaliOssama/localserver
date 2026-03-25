@@ -31,6 +31,7 @@ pub struct Response {
     pub status: StatusCode,
     pub content_type: String,
     pub body: Vec<u8>,
+    pub cookies: Vec<String>,
 }
 
 impl Response {
@@ -39,32 +40,43 @@ impl Response {
             status,
             content_type: content_type.to_string(),
             body,
+            cookies: Vec::new(),
         }
     }
 
-    pub fn send(&self, stream: &mut TcpStream) {
+        pub fn send(&self, stream: &mut TcpStream) {
+        // Build cookie headers
+        let cookie_headers: String = self.cookies
+            .iter()
+            .map(|c| format!("Set-Cookie: {}\r\n", c))
+            .collect();
+
         let header = format!(
-            "HTTP/1.1 {}\r\nContent-Type: {}\r\nContent-Length: {}\r\n\r\n",
+            "HTTP/1.1 {}\r\nContent-Type: {}\r\nContent-Length: {}\r\n{}\r\n",
             self.status.as_str(),
             self.content_type,
-            self.body.len()
+            self.body.len(),
+            cookie_headers  // ← inserted before final \r\n
         );
-        // write header
+
         if let Err(e) = stream.write_all(header.as_bytes()) {
             eprintln!("Failed to write response header: {}", e);
             return;
         }
-        // write body
         if let Err(e) = stream.write_all(&self.body) {
             eprintln!("Failed to write response body: {}", e);
         }
     }
 
-    // Convenience constructors for common error responses
+
     pub fn error(status: StatusCode) -> Response {
-        let body = format!("<html><body><h1>{}</h1></body></html>", status.as_str());
+        let body = format!(
+            "<html><body><h1>{}</h1></body></html>",
+            status.as_str()
+        );
         Response::new(status, "text/html", body.into_bytes())
     }
+
 }
 
 #[cfg(test)]
