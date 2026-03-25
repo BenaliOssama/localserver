@@ -24,9 +24,16 @@ impl CgiRunner {
         let mut child = match Command::new(&self.interpreter)
             .arg(&self.script_path)
             // ── Environment variables — the CGI contract ──────────────────
+            .env(
+                "QUERY_STRING",
+                req.headers
+                    .get("x-query-string")
+                    .map(|s| s.as_str())
+                    .unwrap_or(""),
+            )
             .env("REQUEST_METHOD", method_str(&req.method))
             .env("PATH_INFO", &req.path)
-            .env("QUERY_STRING", query_string(&req.path))
+            //.env("QUERY_STRING", query_string(&req.path))
             .env("CONTENT_LENGTH", req.body.len().to_string())
             .env(
                 "CONTENT_TYPE",

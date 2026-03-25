@@ -5,7 +5,7 @@ import sys
 # Read environment variables the server will set
 method  = os.environ.get("REQUEST_METHOD", "GET")
 path    = os.environ.get("PATH_INFO", "/")
-query   = os.environ.get("QUERY_STRING", "")
+query   = os.environ.get("QUERY_STRING", "") 
 
 # Read body from stdin if POST
 body = ""

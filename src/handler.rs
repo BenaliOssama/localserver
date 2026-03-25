@@ -237,7 +237,7 @@ fn handle_delete(req: &Request, root: &str, config: &ServerConfig) -> Response {
 pub fn handle(req: &mut Request, stream: &mut TcpStream, config: &ServerConfig) {
     use std::io::Write;
     // Extract query string before stripping it from path
-    let query_string = if let Some((path, query)) = req.path.split_once('?') {
+    let query_string = if let Some((path, query)) = req.path.clone().split_once('?') {
         req.path = path.to_string();
         query.to_string()
     } else {
@@ -367,7 +367,7 @@ fn handle_whoami(req: &Request, config: &ServerConfig) -> Response {
     }
 }
 // Keep the test helper working
-pub fn handle_with_root(req: Request, stream: &mut TcpStream, root: &str) {
+pub fn handle_with_root(req: &mut Request, stream: &mut TcpStream, root: &str) {
     let mut config = ServerConfig {
         host: "127.0.0.1".to_string(),
         port: 8080,
@@ -383,7 +383,7 @@ pub fn handle_with_root(req: Request, stream: &mut TcpStream, root: &str) {
             cgi: None,
         }],
     };
-    handle(&mut req.clone(), stream, &config);
+    handle(req, stream, &config);
 }
 
 fn find_cgi<'a>(path: &str, loc: &'a crate::config::Location) -> Option<&'a crate::config::CGI> {
