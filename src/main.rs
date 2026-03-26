@@ -23,15 +23,23 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         config_path
     );
 
-    // Spin up one thread per server block
-    let handles: Vec<_> = config
-        .servers
+    // Group servers by host:port
+    let mut groups: std::collections::HashMap<String, Vec<config::ServerConfig>> =
+        std::collections::HashMap::new();
+
+    for server in config.servers {
+        groups
+            .entry(server.addr())
+            .or_insert_with(Vec::new)
+            .push(server);
+    }
+    // Spawn one thread per unique host:port
+    let handles: Vec<_> = groups
         .into_iter()
-        .map(|server_config| {
+        .map(|(addr, servers)| {
             thread::spawn(move || {
-                let addr = server_config.addr();
-                let srv = server::Server::new(server_config);
-                println!("Starting server on http://{}", addr);
+                println!("Starting listener on http://{}", addr);
+                let srv = server::Server::new(servers);
                 if let Err(e) = srv.run() {
                     eprintln!("Server on {} failed: {}", addr, e);
                 }
@@ -39,7 +47,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         })
         .collect();
 
-    // Wait for all servers — runs forever unless one crashes
     for handle in handles {
         let _ = handle.join();
     }
