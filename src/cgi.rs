@@ -9,6 +9,7 @@ use std::time::Duration;
 pub struct CgiRunner {
     pub interpreter: String,
     pub script_path: String,
+    pub timeout: Duration,
 }
 
 impl CgiRunner {
@@ -16,9 +17,13 @@ impl CgiRunner {
         CgiRunner {
             interpreter: interpreter.to_string(),
             script_path: script_path.to_string(),
+            timeout: Duration::from_secs(10),
         }
     }
-
+    pub fn with_timeout(mut self, timeout: Duration) -> CgiRunner {
+        self.timeout = timeout;
+        self
+    }
     pub fn run(&self, req: &Request) -> Response {
         // ── Build the child process ───────────────────────────────────────
         let mut child = match Command::new(&self.interpreter)
@@ -95,7 +100,7 @@ impl CgiRunner {
 //   Header: Value\n
 //   \n                ← blank line
 //   body bytes
-fn parse_cgi_output(output: &[u8]) -> Response {
+pub(crate) fn parse_cgi_output(output: &[u8]) -> Response {
     // Split on \n\n or \r\n\r\n
     let separator: &[u8] = b"\r\n\r\n";
     let alt_sep: &[u8] = b"\n\n";
@@ -194,5 +199,229 @@ fn query_string(path: &str) -> &str {
     match path.split_once('?') {
         Some((_, query)) => query,
         None => "",
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::response::StatusCode;
+
+    // ── parse_cgi_output ──────────────────────────────────────────────────
+
+    #[test]
+    fn test_basic_html_response() {
+        let output = b"Content-Type: text/html\r\n\r\n<h1>Hello</h1>";
+        let res = parse_cgi_output(output);
+        assert_eq!(res.content_type, "text/html");
+        assert_eq!(res.body, b"<h1>Hello</h1>");
+    }
+
+    #[test]
+    fn test_unix_line_endings() {
+        // Python's print() uses \n not \r\n
+        let output = b"Content-Type: text/html\n\n<h1>Hello</h1>";
+        let res = parse_cgi_output(output);
+        assert_eq!(res.content_type, "text/html");
+        assert_eq!(res.body, b"<h1>Hello</h1>");
+    }
+
+    #[test]
+    fn test_default_content_type_is_html() {
+        // No Content-Type header — should default to text/html
+        let output = b"Content-Type: text/html\r\n\r\nbody";
+        let res = parse_cgi_output(output);
+        assert_eq!(res.content_type, "text/html");
+    }
+
+    #[test]
+    fn test_custom_content_type() {
+        let output = b"Content-Type: application/json\r\n\r\n{\"ok\":true}";
+        let res = parse_cgi_output(output);
+        assert_eq!(res.content_type, "application/json");
+        assert_eq!(res.body, b"{\"ok\":true}");
+    }
+
+    #[test]
+    fn test_status_200_default() {
+        let output = b"Content-Type: text/html\r\n\r\nok";
+        let res = parse_cgi_output(output);
+        assert!(matches!(res.status, StatusCode::Ok));
+    }
+
+    #[test]
+    fn test_status_header_404() {
+        let output = b"Content-Type: text/html\r\nStatus: 404 Not Found\r\n\r\nnot found";
+        let res = parse_cgi_output(output);
+        assert!(matches!(res.status, StatusCode::NotFound));
+    }
+
+    #[test]
+    fn test_status_header_403() {
+        let output = b"Content-Type: text/html\r\nStatus: 403 Forbidden\r\n\r\nforbidden";
+        let res = parse_cgi_output(output);
+        assert!(matches!(res.status, StatusCode::Forbidden));
+    }
+
+    #[test]
+    fn test_status_header_500() {
+        let output = b"Content-Type: text/html\r\nStatus: 500 Internal Server Error\r\n\r\nerror";
+        let res = parse_cgi_output(output);
+        assert!(matches!(res.status, StatusCode::InternalServerError));
+    }
+
+    #[test]
+    fn test_empty_body() {
+        let output = b"Content-Type: text/html\r\n\r\n";
+        let res = parse_cgi_output(output);
+        assert!(res.body.is_empty());
+    }
+
+    #[test]
+    fn test_binary_body_survives() {
+        let mut output = b"Content-Type: application/octet-stream\r\n\r\n".to_vec();
+        output.extend_from_slice(&[0xFF, 0xFE, 0x00, 0x01]);
+        let res = parse_cgi_output(&output);
+        assert_eq!(res.body, &[0xFF, 0xFE, 0x00, 0x01]);
+    }
+
+    #[test]
+    fn test_missing_separator_returns_500() {
+        // No \r\n\r\n or \n\n — malformed CGI output
+        let output = b"Content-Type: text/html body with no separator";
+        let res = parse_cgi_output(output);
+        assert!(matches!(res.status, StatusCode::InternalServerError));
+    }
+
+    #[test]
+    fn test_body_with_blank_lines() {
+        // Body itself contains blank lines — must not confuse the parser
+        let output = b"Content-Type: text/html\r\n\r\nline1\r\n\r\nline2";
+        let res = parse_cgi_output(output);
+        assert_eq!(res.body, b"line1\r\n\r\nline2");
+    }
+
+    #[test]
+    fn test_multiple_headers() {
+        let output = b"Content-Type: text/plain\r\nStatus: 200 OK\r\nX-Custom: value\r\n\r\nhello";
+        let res = parse_cgi_output(output);
+        assert_eq!(res.content_type, "text/plain");
+        assert_eq!(res.body, b"hello");
+    }
+
+    // ── CgiRunner integration ─────────────────────────────────────────────
+    // These tests actually run a real Python script
+
+    #[test]
+    fn test_real_cgi_script_get() {
+        // Skip if python3 not available
+        if std::process::Command::new("python3")
+            .arg("--version")
+            .output()
+            .is_err()
+        {
+            return;
+        }
+
+        // Write a minimal test script
+        let script = "/tmp/test_cgi.py";
+        std::fs::write(script, b"#!/usr/bin/env python3\nprint('Content-Type: text/plain')\nprint()\nprint('hello from cgi')\n").unwrap();
+
+        use crate::request::{Method, Request};
+        let req = Request {
+            method: Method::Get,
+            path: "/test.py".to_string(),
+            version: "HTTP/1.1".to_string(),
+            headers: std::collections::HashMap::new(),
+            body: Vec::new(),
+        };
+
+        let runner = CgiRunner::new("python3", script);
+        let res = runner.run(&req);
+
+        assert!(matches!(res.status, StatusCode::Ok));
+        assert_eq!(res.content_type, "text/plain");
+        assert_eq!(res.body, b"hello from cgi\n");
+    }
+
+    #[test]
+    fn test_real_cgi_script_reads_env() {
+        if std::process::Command::new("python3")
+            .arg("--version")
+            .output()
+            .is_err()
+        {
+            return;
+        }
+
+        let script = "/tmp/test_cgi_env.py";
+        std::fs::write(script,
+            b"#!/usr/bin/env python3\nimport os\nprint('Content-Type: text/plain')\nprint()\nprint(os.environ.get('REQUEST_METHOD', 'MISSING'))\n"
+        ).unwrap();
+
+        use crate::request::{Method, Request};
+        let req = Request {
+            method: Method::Post,
+            path: "/test.py".to_string(),
+            version: "HTTP/1.1".to_string(),
+            headers: std::collections::HashMap::new(),
+            body: Vec::new(),
+        };
+
+        let runner = CgiRunner::new("python3", script);
+        let res = runner.run(&req);
+        assert_eq!(res.body, b"POST\n");
+    }
+
+    #[test]
+    fn test_cgi_timeout() {
+        if std::process::Command::new("python3")
+            .arg("--version")
+            .output()
+            .is_err()
+        {
+            return;
+        }
+
+        // Script that sleeps forever
+        let script = "/tmp/test_cgi_timeout.py";
+        std::fs::write(
+            script,
+            b"#!/usr/bin/env python3\nimport time\ntime.sleep(999)\n",
+        )
+        .unwrap();
+
+        use crate::request::{Method, Request};
+        let req = Request {
+            method: Method::Get,
+            path: "/test.py".to_string(),
+            version: "HTTP/1.1".to_string(),
+            headers: std::collections::HashMap::new(),
+            body: Vec::new(),
+        };
+
+        // Use a very short timeout for testing
+        let runner = CgiRunner::new("python3", script).with_timeout(Duration::from_millis(200));
+
+        let res = runner.run(&req);
+
+        // Timed out script must return 500 not hang
+        assert!(matches!(res.status, StatusCode::InternalServerError));
+    }
+
+    #[test]
+    fn test_nonexistent_script_returns_500() {
+        use crate::request::{Method, Request};
+        let req = Request {
+            method: Method::Get,
+            path: "/ghost.py".to_string(),
+            version: "HTTP/1.1".to_string(),
+            headers: std::collections::HashMap::new(),
+            body: Vec::new(),
+        };
+
+        let runner = CgiRunner::new("python3", "/tmp/does_not_exist.py");
+        let res = runner.run(&req);
+        assert!(matches!(res.status, StatusCode::InternalServerError));
     }
 }

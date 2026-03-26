@@ -330,3 +330,77 @@ fn test_malformed_chunk_size_returns_none() {
     let raw = b"POST /upload HTTP/1.1\r\nHost: localhost\r\nTransfer-Encoding: chunked\r\n\r\ngg\r\nhello\r\n0\r\n\r\n";
     assert!(Request::parse(raw).is_none());
 }
+
+// ── Cookie tests ──────────────────────────────────────────────────────────
+
+#[test]
+fn test_no_cookie_header_returns_empty_map() {
+    let raw = b"GET / HTTP/1.1\r\nHost: localhost\r\n\r\n";
+    let req = Request::parse(raw).unwrap();
+    assert!(req.cookies().is_empty());
+}
+
+#[test]
+fn test_single_cookie_parsed() {
+    let raw = b"GET / HTTP/1.1\r\nCookie: session_id=abc123\r\n\r\n";
+    let req = Request::parse(raw).unwrap();
+    assert_eq!(
+        req.cookies().get("session_id").map(|s| s.as_str()),
+        Some("abc123")
+    );
+}
+
+#[test]
+fn test_multiple_cookies_parsed() {
+    let raw = b"GET / HTTP/1.1\r\nCookie: session_id=abc123; user=sam; theme=dark\r\n\r\n";
+    let req = Request::parse(raw).unwrap();
+    let cookies = req.cookies();
+    assert_eq!(
+        cookies.get("session_id").map(|s| s.as_str()),
+        Some("abc123")
+    );
+    assert_eq!(cookies.get("user").map(|s| s.as_str()), Some("sam"));
+    assert_eq!(cookies.get("theme").map(|s| s.as_str()), Some("dark"));
+}
+
+#[test]
+fn test_cookie_with_spaces_around_separator() {
+    let raw = b"GET / HTTP/1.1\r\nCookie: a=1 ; b=2 ; c=3\r\n\r\n";
+    let req = Request::parse(raw).unwrap();
+    let cookies = req.cookies();
+    assert_eq!(cookies.get("a").map(|s| s.as_str()), Some("1"));
+    assert_eq!(cookies.get("b").map(|s| s.as_str()), Some("2"));
+    assert_eq!(cookies.get("c").map(|s| s.as_str()), Some("3"));
+}
+
+#[test]
+fn test_session_id_extracted() {
+    let raw = b"GET / HTTP/1.1\r\nCookie: session_id=xyz789\r\n\r\n";
+    let req = Request::parse(raw).unwrap();
+    assert_eq!(req.session_id().as_deref(), Some("xyz789"));
+}
+
+#[test]
+fn test_session_id_missing_returns_none() {
+    let raw = b"GET / HTTP/1.1\r\nCookie: theme=dark\r\n\r\n";
+    let req = Request::parse(raw).unwrap();
+    assert!(req.session_id().is_none());
+}
+
+#[test]
+fn test_session_id_no_cookies_returns_none() {
+    let raw = b"GET / HTTP/1.1\r\nHost: localhost\r\n\r\n";
+    let req = Request::parse(raw).unwrap();
+    assert!(req.session_id().is_none());
+}
+
+#[test]
+fn test_cookie_value_with_equals_sign() {
+    // Base64 values contain '=' — must split on first '=' only
+    let raw = b"GET / HTTP/1.1\r\nCookie: token=abc==\r\n\r\n";
+    let req = Request::parse(raw).unwrap();
+    assert_eq!(
+        req.cookies().get("token").map(|s| s.as_str()),
+        Some("abc==")
+    );
+}
