@@ -41,7 +41,9 @@ fn start_server() -> u16 {
     };
 
     thread::spawn(move || {
-        localserver::server::Server::new(config).run().unwrap();
+        localserver::server::Server::new(vec![config])
+            .run()
+            .unwrap();
     });
 
     thread::sleep(Duration::from_millis(100));

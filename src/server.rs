@@ -14,18 +14,34 @@ use crate::request::Request;
 use crate::response::{Response, StatusCode};
 
 pub struct Server {
-    config: ServerConfig,
+    configs: Vec<ServerConfig>,
 }
 
 impl Server {
-    pub fn new(config: ServerConfig) -> Server {
-        Server { config }
+    pub fn new(configs: Vec<ServerConfig>) -> Server {
+        Server { configs }
     }
+    // Find the right config for this request based on Host header
+    fn match_config(&self, req: &Request) -> &ServerConfig {
+        let host = req
+            .headers
+            .get("host")
+            .map(|h| h.split(':').next().unwrap_or(""))
+            .unwrap_or("");
 
+        // Try to find a matching server_name
+        self.configs
+            .iter()
+            .find(|c| c.server_name.as_deref() == Some(host))
+            // Fall back to first config if no match
+            .unwrap_or(&self.configs[0])
+    }
     pub fn run(&self) -> Result<(), Box<dyn std::error::Error>> {
-        let listener = TcpListener::bind(self.config.addr())?;
+        // Use first config's addr to bind
+        let addr = self.configs[0].addr();
+        let listener = TcpListener::bind(&addr)?;
         set_nonblocking(listener.as_raw_fd())?;
-        println!("Server listening on http://{}", self.config.addr());
+        println!("Server listening on http://{}", addr);
 
         let epoll = Epoll::new()?;
         epoll.add(listener.as_raw_fd())?;
@@ -80,7 +96,7 @@ impl Server {
         loop {
             match listener.accept() {
                 Ok((stream, addr)) => {
-                    println!("[{}] New connection: {}", self.config.addr(), addr);
+                    println!("[{}] New connection: {}", self.configs[0].addr(), addr);
                     let fd = stream.as_raw_fd();
                     set_nonblocking(fd)?;
                     epoll.add(fd)?;
@@ -133,7 +149,7 @@ impl Server {
 
         // ── Check body size limit ─────────────────────────────────────────
         if let Some(data) = buffers.get(&fd) {
-            if data.len() > self.config.client_max_body_size {
+            if data.len() > self.configs[0].client_max_body_size {
                 eprintln!("Client {} exceeded max body size", fd);
                 Response::error(StatusCode::ContentTooLarge).send(&mut stream);
                 let _ = epoll.remove(fd);
@@ -147,8 +163,8 @@ impl Server {
         if let Some(data) = buffers.get(&fd) {
             match Request::parse(data) {
                 Some(req) => {
-                    println!("[{}] {:?} {}", self.config.addr(), req.method, req.path);
-                    handler::handle(&mut req.clone(), &mut stream, &self.config);
+                    println!("[{}] {:?} {}", self.configs[0].addr(), req.method, req.path);
+                    handler::handle(&mut req.clone(), &mut stream, &self.configs[0]);
                 }
                 None => {
                     Response::error(StatusCode::BadRequest).send(&mut stream);

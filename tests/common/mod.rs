@@ -170,7 +170,9 @@ raise Exception('intentional crash')
 // Internal helper — spawns a server thread and waits for it to start
 fn spawn_server(config: ServerConfig) {
     thread::spawn(move || {
-        localserver::server::Server::new(config).run().unwrap();
+        localserver::server::Server::new(vec![config])
+            .run()
+            .unwrap();
     });
     thread::sleep(Duration::from_millis(100));
 }
