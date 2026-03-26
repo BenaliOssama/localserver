@@ -49,7 +49,7 @@ fn start_server() -> u16 {
 
 // ── Helper: send a raw HTTP request, get raw bytes back ──────────────────────
 
-fn send_request(port: u16, request: &str) -> Vec<u8> {
+pub fn send_request(port: u16, request: &str) -> Vec<u8> {
     let mut stream = TcpStream::connect(format!("127.0.0.1:{}", port)).unwrap();
     stream
         .set_read_timeout(Some(Duration::from_secs(3)))
