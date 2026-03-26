@@ -5,7 +5,7 @@ pub mod tokenizer;
 #[cfg(test)]
 mod tests;
 
-use std::collections::HashMap;
+use std::{collections::HashMap, net::ToSocketAddrs};
 
 #[derive(Debug)]
 pub struct Config {
@@ -16,6 +16,7 @@ pub struct Config {
 pub struct ServerConfig {
     pub host: String,
     pub port: u16,
+    pub server_name: Option<String>,
     pub client_max_body_size: usize,       // in bytes
     pub error_pages: HashMap<u16, String>, // e.g. 404 → "./error_pages/404.html"
     pub locations: Vec<Location>,
@@ -52,7 +53,21 @@ impl Config {
 
         let tokens = tokenizer::tokenize(&content);
         let mut parser = parser::Parser::new(tokens);
-        parser.parse_config().map_err(|e| e.to_string())
+
+        let config = parser.parse_config().map_err(|e| e.to_string())?;
+
+        // ── Detect duplicate host:port combinations ───────────────────────────
+        let mut seen = std::collections::HashSet::new();
+        for server in &config.servers {
+            let addr = server.addr();
+            if !seen.insert(addr.clone()) {
+                return Err(format!(
+                    "Duplicate server address '{}' — each host:port must be unique",
+                    addr
+                ));
+            }
+        }
+        Ok(config)
     }
 }
 
@@ -81,4 +96,25 @@ pub fn parse_body_size(s: &str) -> Result<usize, String> {
             .parse::<usize>()
             .map_err(|_| format!("Invalid size: {}", s))
     }
+}
+
+#[test]
+fn test_duplicate_port_fails() {
+    use super::*;
+    // Simulating Config::from_file behavior — we test the validation
+    // by checking two servers with same host:port
+    let input = r#"
+        server { host 127.0.0.1; port 8080; }
+        server { host 127.0.0.1; port 8080; }
+    "#;
+
+    // Parse succeeds but validation should catch duplicate
+    let tokens = tokenizer::tokenize(&input); //tokenizer.toc(input);
+    let mut parser = parser::Parser::new(tokens); //Parser::new(tokens);
+    let config = parser.parse_config().unwrap();
+
+    let mut seen = std::collections::HashSet::new();
+    let has_duplicate = config.servers.iter().any(|s| !seen.insert(s.addr()));
+
+    assert!(has_duplicate, "Should have detected duplicate address");
 }

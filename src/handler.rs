@@ -371,11 +371,13 @@ pub fn handle_with_root(req: &mut Request, stream: &mut TcpStream, root: &str) {
     let mut config = ServerConfig {
         host: "127.0.0.1".to_string(),
         port: 8080,
+        server_name: None,
         client_max_body_size: 1024 * 1024,
         error_pages: std::collections::HashMap::new(),
         locations: vec![crate::config::Location {
             path: "/".to_string(),
             root: root.to_string(),
+
             index: Some("index.html".to_string()),
             methods: vec![],
             autoindex: false,

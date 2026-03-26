@@ -63,6 +63,7 @@ pub fn start_server() -> u16 {
     let config = ServerConfig {
         host: "127.0.0.1".to_string(),
         port,
+        server_name: None,
         client_max_body_size: 1024 * 1024,
         error_pages: std::collections::HashMap::new(),
         locations: vec![
@@ -145,6 +146,7 @@ raise Exception('intentional crash')
     let config = ServerConfig {
         host: "127.0.0.1".to_string(),
         port,
+        server_name: None,
         client_max_body_size: 1024 * 1024,
         error_pages: std::collections::HashMap::new(),
         locations: vec![Location {

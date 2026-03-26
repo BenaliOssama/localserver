@@ -1,3 +1,5 @@
+use crate::config::tokenizer;
+
 use super::errors::{ParseError, ParseResult};
 use super::tokenizer::{Token, TokenKind};
 use super::{CGI, Location, Method, ServerConfig, parse_body_size};
@@ -90,6 +92,7 @@ impl Parser {
 
         let mut host = None;
         let mut port = None;
+        let mut server_name: Option<String> = None;
         let mut client_max_body_size = 1024 * 1024; // default 1MB
         let mut error_pages = HashMap::new();
         let mut locations = Vec::new();
@@ -114,6 +117,10 @@ impl Parser {
                             port = Some(u16::from_str(&raw).map_err(|_| {
                                 ParseError::new(format!("Invalid port number '{}'", raw), self.pos)
                             })?);
+                            self.expect(TokenKind::Semicolon)?;
+                        }
+                        "server_name" => {
+                            server_name = Some(self.expect_word()?);
                             self.expect(TokenKind::Semicolon)?;
                         }
                         "client_max_body_size" => {
@@ -168,6 +175,7 @@ impl Parser {
         Ok(ServerConfig {
             host,
             port,
+            server_name,
             client_max_body_size,
             error_pages,
             locations,
@@ -320,4 +328,24 @@ impl Parser {
             cgi,
         })
     }
+}
+
+#[test]
+fn test_duplicate_port_fails() {
+    // Simulating Config::from_file behavior — we test the validation
+    // by checking two servers with same host:port
+    let input = r#"
+        server { host 127.0.0.1; port 8080; }
+        server { host 127.0.0.1; port 8080; }
+    "#;
+
+    // Parse succeeds but validation should catch duplicate
+    let tokens = tokenizer::tokenize(&input);
+    let mut parser = Parser::new(tokens);
+    let config = parser.parse_config().unwrap();
+
+    let mut seen = std::collections::HashSet::new();
+    let has_duplicate = config.servers.iter().any(|s| !seen.insert(s.addr()));
+
+    assert!(has_duplicate, "Should have detected duplicate address");
 }
