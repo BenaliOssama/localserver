@@ -163,8 +163,9 @@ impl Server {
         if let Some(data) = buffers.get(&fd) {
             match Request::parse(data) {
                 Some(req) => {
-                    println!("[{}] {:?} {}", self.configs[0].addr(), req.method, req.path);
-                    handler::handle(&mut req.clone(), &mut stream, &self.configs[0]);
+                    let config = self.match_config(&req);
+                    println!("[{:?}] {:?} {}", config, req.method, req.path);
+                    handler::handle(&mut req.clone(), &mut stream, config);
                 }
                 None => {
                     Response::error(StatusCode::BadRequest).send(&mut stream);
