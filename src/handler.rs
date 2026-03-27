@@ -54,6 +54,7 @@ fn is_method_allowed(req_method: &Method, loc: &Location) -> bool {
 }
 
 fn error_response(status: StatusCode, config: &ServerConfig) -> Response {
+    println!("no location");
     // Check if config defines a custom error page for this status
     let code = match status {
         StatusCode::NotFound => 404u16,
@@ -172,8 +173,9 @@ fn serve_file(path: &str, root: &str, config: &ServerConfig) -> Response {
     } else {
         path.to_string()
     };
-
+    println!("normalized path {}", normalized);
     let file_path = format!("{}{}", root, normalized);
+    println!("file path {}", file_path);
     let meta = match fs::metadata(&file_path) {
         Ok(m) => m,
         Err(_) => return error_response(StatusCode::NotFound, config),
@@ -263,24 +265,32 @@ pub fn build_response(req: Request, config: &ServerConfig) -> Response {
 }
 
 fn handle_with_route(req: Request, config: &ServerConfig) -> Response {
+    println!("path -> -> -> {}", req.path);
     match match_location(&req.path, config) {
         None => error_response(StatusCode::NotFound, config),
         Some(loc) => {
+            println!("some location");
             if !is_method_allowed(&req.method, loc) {
                 error_response(StatusCode::MethodNotAllowed, config)
             } else {
                 let root = loc.root.clone();
                 match req.method {
                     Method::Get | Method::Post => {
+                        println!("get post ");
                         if let Some(cgi) = find_cgi(&req.path, loc) {
                             let relative = strip_location_prefix(&req.path, &loc.path);
+                            println!("relative path now: {}", relative);
                             let script = format!("{}/{}", root, relative);
                             CgiRunner::new(&cgi.interpreter, &script).run(&req)
                         } else {
                             match req.method {
                                 Method::Get => {
-                                    let relative = strip_location_prefix(&req.path, &loc.path);
-                                    serve_file(&format!("/{}", relative), &root, config)
+                                    println!("get found");
+                                    println!("location before stipr {}", loc.path);
+                                    //let relative = strip_location_prefix(&req.path, &loc.path);
+                                    // println!("location after stipr {}", relative);
+
+                                    serve_file( &loc.path , &root, config)
                                 }
                                 Method::Post => {
                                     let relative = strip_location_prefix(&req.path, &loc.path);
