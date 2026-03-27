@@ -17,7 +17,7 @@ server {
         methods GET POST DELETE;
     }
     location /files {
-        root ./files;
+        root ./www/files;
         autoindex on;
         methods GET;
     }

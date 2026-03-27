@@ -290,8 +290,8 @@ fi
 
 # Directory listing
 log "Directory listing (autoindex)..."
-mkdir -p www/files
-echo "test" > www/files/test.txt
+mkdir -p files
+echo "test" > files/test.txt
 STATUS=$(get_status "$BASE/files/")
 if [ "$STATUS" = "200" ]; then
     BODY=$(curl -s "$BASE/files/")
@@ -403,36 +403,37 @@ section "6. Siege availability"
 
 log "Running siege -b for 30s on $BASE/..."
 
-# Create a simple page for siege
 mkdir -p www
 echo "<html><body><h1>Siege Test</h1></body></html>" > www/siege_test.html
 
+# Run siege and capture output — siege writes to stderr
 SIEGE_OUTPUT=$(siege -b -t 30s -c 10 \
     --log=/dev/null \
     "$BASE/siege_test.html" 2>&1)
 
+log "Raw siege output:"
+echo "$SIEGE_OUTPUT"
+
 AVAILABILITY=$(echo "$SIEGE_OUTPUT" | python3 -c "
 import sys, json
+raw = sys.stdin.read().strip()
 try:
-    data = json.load(sys.stdin)
+    data = json.loads(raw)
     print(data['availability'])
-except:
+except Exception as e:
     print('0')
-")
-
-TRANSACTIONS=$(echo "$SIEGE_OUTPUT" | python3 -c "
-import sys, json
-try:
-    data = json.load(sys.stdin)
-    print(data['transactions'])
-except:
-    print('0')
-")
+" 2>/dev/null)
 
 log "Availability: ${AVAILABILITY}%"
-log "Transactions: ${TRANSACTIONS}"
 
-OK=$(python3 -c "print('yes' if float('${AVAILABILITY}') >= 99.5 else 'no')" 2>/dev/null)
+OK=$(python3 -c "
+try:
+    v = float('${AVAILABILITY}')
+    print('yes' if v >= 99.5 else 'no')
+except:
+    print('no')
+" 2>/dev/null)
+
 if [ "$OK" = "yes" ]; then
     pass "Siege availability ${AVAILABILITY}% >= 99.5%"
 else
@@ -445,9 +446,10 @@ section "7. Memory and hanging connections"
 
 # Check for hanging connections
 log "Checking for hanging connections..."
-CONNECTIONS=$(ss -tn | grep ":${PORT}" | grep -c "ESTABLISHED" || echo "0")
+CONNECTIONS=$(ss -tn | grep ":${PORT}" | grep -c "ESTABLISHED" 2>/dev/null || echo "0")
+CONNECTIONS=$(echo "$CONNECTIONS" | tr -d '[:space:]')
 log "Current established connections: $CONNECTIONS"
-if [ "$CONNECTIONS" -lt 50 ]; then
+if [ "${CONNECTIONS:-0}" -lt 50 ]; then
     pass "No excessive hanging connections ($CONNECTIONS active)"
 else
     fail "Too many hanging connections: $CONNECTIONS"
