@@ -177,7 +177,10 @@ fn serve_file(path: &str, root: &str, config: &ServerConfig) -> Response {
     let file_path = format!("{}{}", root, normalized);
     println!("file path {}", file_path);
     let meta = match fs::metadata(&file_path) {
-        Ok(m) => m,
+        Ok(m) => {
+            println!("meta data {:?}", m);
+            m
+        },
         Err(_) => return error_response(StatusCode::NotFound, config),
     };
 
@@ -286,11 +289,11 @@ fn handle_with_route(req: Request, config: &ServerConfig) -> Response {
                             match req.method {
                                 Method::Get => {
                                     println!("get found");
-                                    println!("location before stipr {}", loc.path);
+                                    println!("location before stipr {}", req.path);
                                     //let relative = strip_location_prefix(&req.path, &loc.path);
                                     // println!("location after stipr {}", relative);
 
-                                    serve_file( &loc.path , &root, config)
+                                    serve_file( &req.path , &root, config)
                                 }
                                 Method::Post => {
                                     let relative = strip_location_prefix(&req.path, &loc.path);
