@@ -166,32 +166,36 @@ fn serve_directory(url_path: &str, dir_path: &str, config: &ServerConfig) -> Res
 
     Response::new(StatusCode::Ok, "text/html", html.into_bytes())
 }
-
 fn serve_file(path: &str, root: &str, config: &ServerConfig) -> Response {
-    let normalized = if path.ends_with('/') {
-        format!("{}index.html", path)
-    } else {
-        path.to_string()
-    };
-    println!("normalized path {}", normalized);
-    let file_path = format!("{}{}", root, normalized);
-    println!("file path {}", file_path);
+    // Don't append index.html yet — check what's actually on disk first
+    let file_path = format!("{}{}", root, path);
+
     let meta = match fs::metadata(&file_path) {
-        Ok(m) => {
-            println!("meta data {:?}", m);
-            m
-        },
-        Err(_) => return error_response(StatusCode::NotFound, config),
+        Ok(m) => m,
+        Err(_) => {
+            // Try with trailing slash stripped
+            let trimmed = format!("{}{}", root, path.trim_end_matches('/'));
+            match fs::metadata(&trimmed) {
+                Ok(m) => m,
+                Err(_) => return error_response(StatusCode::NotFound, config),
+            }
+        }
     };
 
-    // If it's a directory, hand off to directory listing
     if meta.is_dir() {
+        // Directory — try index.html first, then autoindex
+        let index_path = format!("{}/index.html", file_path.trim_end_matches('/'));
+        if let Ok(contents) = fs::read(&index_path) {
+            return Response::new(StatusCode::Ok, "text/html", contents);
+        }
+        // No index.html — try directory listing
         return serve_directory(path, &file_path, config);
     }
 
+    // It's a file — serve it
     match fs::read(&file_path) {
         Ok(contents) => {
-            let content_type = get_content_type(&normalized);
+            let content_type = get_content_type(path);
             Response::new(StatusCode::Ok, content_type, contents)
         }
         Err(_) => error_response(StatusCode::NotFound, config),
@@ -293,13 +297,13 @@ fn handle_with_route(req: Request, config: &ServerConfig) -> Response {
                                     //let relative = strip_location_prefix(&req.path, &loc.path);
                                     // println!("location after stipr {}", relative);
 
-                                    serve_file( &req.path , &root, config)
+                                    serve_file(&req.path, &root, config)
                                 }
                                 Method::Post => {
                                     let relative = strip_location_prefix(&req.path, &loc.path);
                                     let mut adjusted = req.clone();
                                     adjusted.path = format!("/{}", relative);
-                                    handle_post(&adjusted, &root, config)
+                                    handle_post(&req, &root, config)
                                 }
                                 _ => unreachable!(),
                             }
@@ -309,7 +313,7 @@ fn handle_with_route(req: Request, config: &ServerConfig) -> Response {
                         let relative = strip_location_prefix(&req.path, &loc.path);
                         let mut adjusted = req.clone();
                         adjusted.path = format!("/{}", relative);
-                        handle_delete(&adjusted, &root, config)
+                        handle_delete(&req, &root, config)
                     }
                     Method::Unknown(_) => error_response(StatusCode::MethodNotAllowed, config),
                 }
