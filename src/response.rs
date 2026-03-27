@@ -14,7 +14,7 @@ pub enum StatusCode {
 }
 
 impl StatusCode {
-    fn as_str(&self) -> &str {
+    pub fn as_str(&self) -> &str {
         match self {
             StatusCode::Ok => "200 OK",
             StatusCode::BadRequest => "400 Bad Request",
@@ -32,6 +32,7 @@ pub struct Response {
     pub content_type: String,
     pub body: Vec<u8>,
     pub cookies: Vec<String>,
+    pub redirect_location: Option<String>,
 }
 
 impl Response {
@@ -41,9 +42,14 @@ impl Response {
             content_type: content_type.to_string(),
             body,
             cookies: Vec::new(),
+            redirect_location: None,
         }
     }
-
+    pub fn redirect(location: &str, body: Vec<u8>) -> Response {
+        let mut res = Response::new(StatusCode::Ok, "text/html", body);
+        res.redirect_location = Some(location.to_string());
+        res
+    }
     pub fn send(&self, stream: &mut TcpStream) {
         // Build cookie headers
         let cookie_headers: String = self

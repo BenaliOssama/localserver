@@ -234,87 +234,75 @@ fn handle_delete(req: &Request, root: &str, config: &ServerConfig) -> Response {
     }
 }
 
-pub fn handle(req: &mut Request, stream: &mut TcpStream, config: &ServerConfig) {
-    use std::io::Write;
-    // Extract query string before stripping it from path
-    let query_string = if let Some((path, query)) = req.path.clone().split_once('?') {
-        req.path = path.to_string();
-        query.to_string()
-    } else {
-        String::new()
-    };
-
-    req.headers
-        .insert("x-query-string".to_string(), query_string);
-    // ── Check for redirect first ──────────────────────────────────────────
+pub fn build_response(req: Request, config: &ServerConfig) -> Response {
+    // ── Check for redirect ────────────────────────────────────────────
     if let Some(loc) = match_location(&req.path, config) {
         if let Some(redirect_to) = &loc.redirect {
             let body = format!(
                 "<html><body>Redirecting to <a href='{}'>{}</a></body></html>",
                 redirect_to, redirect_to
             );
-            let response = format!(
+            let header = format!(
                 "HTTP/1.1 301 Moved Permanently\r\nLocation: {}\r\nContent-Length: {}\r\nContent-Type: text/html\r\n\r\n{}",
                 redirect_to,
                 body.len(),
                 body
             );
-            let _ = stream.write_all(response.as_bytes());
-            return;
+            // Return as raw response — redirect needs Location header
+            return Response::redirect(redirect_to, body.into_bytes());
         }
     }
-    // ── Session-aware routes ──────────────────────────────────────────────────
-    println!("looking for response");
-    let response = match req.path.as_str() {
+
+    // ── Session routes ────────────────────────────────────────────────
+    match req.path.as_str() {
         "/login" if matches!(req.method, Method::Post) => handle_login(&req),
         "/logout" if matches!(req.method, Method::Post) => handle_logout(&req),
         "/whoami" => handle_whoami(&req, config),
-        _ => match match_location(&req.path, config) {
-            None => error_response(StatusCode::NotFound, config),
+        _ => handle_with_route(req, config),
+    }
+}
 
-            Some(loc) => {
-                if !is_method_allowed(&req.method, loc) {
-                    error_response(StatusCode::MethodNotAllowed, config)
-                } else {
-                    let root = loc.root.clone();
-                    match req.method {
-                        Method::Get | Method::Post => {
-                            if let Some(cgi) = find_cgi(&req.path, loc) {
-                                // Build the full path to the script
-                                let relative = strip_location_prefix(&req.path, &loc.path);
-                                let script = format!("{}/{}", root, relative);
-                                CgiRunner::new(&cgi.interpreter, &script).run(&req)
-                            } else {
-                                match req.method {
-                                    Method::Get => {
-                                        let relative = strip_location_prefix(&req.path, &loc.path);
-                                        serve_file(&format!("/{}", relative), &root, config)
-                                    }
-                                    Method::Post => {
-                                        let relative = strip_location_prefix(&req.path, &loc.path);
-                                        let mut adjusted = req.clone(); // requires #[derive(Clone)] on Request
-                                        adjusted.path = format!("/{}", relative);
-                                        handle_post(&adjusted, &root, config)
-                                    }
-                                    _ => unreachable!(),
+fn handle_with_route(req: Request, config: &ServerConfig) -> Response {
+    match match_location(&req.path, config) {
+        None => error_response(StatusCode::NotFound, config),
+        Some(loc) => {
+            if !is_method_allowed(&req.method, loc) {
+                error_response(StatusCode::MethodNotAllowed, config)
+            } else {
+                let root = loc.root.clone();
+                match req.method {
+                    Method::Get | Method::Post => {
+                        if let Some(cgi) = find_cgi(&req.path, loc) {
+                            let relative = strip_location_prefix(&req.path, &loc.path);
+                            let script = format!("{}/{}", root, relative);
+                            CgiRunner::new(&cgi.interpreter, &script).run(&req)
+                        } else {
+                            match req.method {
+                                Method::Get => {
+                                    let relative = strip_location_prefix(&req.path, &loc.path);
+                                    serve_file(&format!("/{}", relative), &root, config)
                                 }
+                                Method::Post => {
+                                    let relative = strip_location_prefix(&req.path, &loc.path);
+                                    let mut adjusted = req.clone();
+                                    adjusted.path = format!("/{}", relative);
+                                    handle_post(&adjusted, &root, config)
+                                }
+                                _ => unreachable!(),
                             }
                         }
-                        Method::Delete => {
-                            let relative = strip_location_prefix(&req.path, &loc.path);
-                            let mut adjusted = req.clone();
-                            adjusted.path = format!("/{}", relative);
-                            handle_delete(&adjusted, &root, config)
-                        }
-                        Method::Unknown(_) => error_response(StatusCode::MethodNotAllowed, config),
                     }
+                    Method::Delete => {
+                        let relative = strip_location_prefix(&req.path, &loc.path);
+                        let mut adjusted = req.clone();
+                        adjusted.path = format!("/{}", relative);
+                        handle_delete(&adjusted, &root, config)
+                    }
+                    Method::Unknown(_) => error_response(StatusCode::MethodNotAllowed, config),
                 }
             }
-        }, // ← rename your existing match block
-    };
-    // ── Match location and check method ───────────────────────────────────
-
-    response.send(stream);
+        }
+    }
 }
 fn handle_login(req: &Request) -> Response {
     println!("-----------> in the login handler");
@@ -385,7 +373,8 @@ pub fn handle_with_root(req: &mut Request, stream: &mut TcpStream, root: &str) {
             cgi: None,
         }],
     };
-    handle(req, stream, &config);
+    let response = build_response(req.clone(), &config);
+    response.send(stream);
 }
 
 fn find_cgi<'a>(path: &str, loc: &'a crate::config::Location) -> Option<&'a crate::config::CGI> {

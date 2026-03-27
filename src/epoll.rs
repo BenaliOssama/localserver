@@ -1,9 +1,10 @@
 // src/epoll.rs
 
 use libc::{
-    EPOLL_CTL_ADD, EPOLL_CTL_DEL, EPOLLET, EPOLLIN, epoll_create1, epoll_ctl, epoll_event,
-    epoll_wait,
+    EPOLL_CTL_ADD, EPOLL_CTL_DEL, EPOLL_CTL_MOD, EPOLLET, EPOLLIN, EPOLLOUT, epoll_create1,
+    epoll_ctl, epoll_event, epoll_wait,
 };
+
 use std::os::unix::io::RawFd;
 
 pub const MAX_EVENTS: usize = 128;
@@ -38,6 +39,31 @@ impl Epoll {
         Ok(())
     }
 
+    // Switch a fd from read-watching to write-watching
+    pub fn watch_write(&self, socket_fd: RawFd) -> Result<(), std::io::Error> {
+        let mut event = epoll_event {
+            events: (EPOLLOUT | EPOLLET) as u32,
+            u64: socket_fd as u64,
+        };
+        let result = unsafe { epoll_ctl(self.fd, EPOLL_CTL_MOD, socket_fd, &mut event) };
+        if result < 0 {
+            return Err(std::io::Error::last_os_error());
+        }
+        Ok(())
+    }
+
+    // Switch back to read-watching
+    pub fn watch_read(&self, socket_fd: RawFd) -> Result<(), std::io::Error> {
+        let mut event = epoll_event {
+            events: (EPOLLIN | EPOLLET) as u32,
+            u64: socket_fd as u64,
+        };
+        let result = unsafe { epoll_ctl(self.fd, EPOLL_CTL_MOD, socket_fd, &mut event) };
+        if result < 0 {
+            return Err(std::io::Error::last_os_error());
+        }
+        Ok(())
+    }
     pub fn remove(&self, socket_fd: RawFd) -> Result<(), std::io::Error> {
         let result = unsafe { epoll_ctl(self.fd, EPOLL_CTL_DEL, socket_fd, std::ptr::null_mut()) };
 
