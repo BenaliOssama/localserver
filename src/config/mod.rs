@@ -56,14 +56,21 @@ impl Config {
 
         let config = parser.parse_config().map_err(|e| e.to_string())?;
 
-        // ── Detect duplicate host:port combinations ───────────────────────────
+        // Check for duplicate host:port + server_name combinations
         let mut seen = std::collections::HashSet::new();
         for server in &config.servers {
-            let addr = server.addr();
-            if !seen.insert(addr.clone()) {
+            // Two servers can share host:port only if they have different server_names
+            // Two servers cannot share host:port + server_name
+            let key = format!(
+                "{}:{}:{}",
+                server.host,
+                server.port,
+                server.server_name.as_deref().unwrap_or("")
+            );
+            if !seen.insert(key.clone()) {
                 return Err(format!(
-                    "Duplicate server address '{}' — each host:port must be unique",
-                    addr
+                    "Duplicate server '{}' — each host:port:server_name combination must be unique",
+                    key
                 ));
             }
         }
