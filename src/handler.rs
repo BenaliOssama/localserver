@@ -54,7 +54,6 @@ fn is_method_allowed(req_method: &Method, loc: &Location) -> bool {
 }
 
 fn error_response(status: StatusCode, config: &ServerConfig) -> Response {
-    println!("no location");
     // Check if config defines a custom error page for this status
     let code = match status {
         StatusCode::NotFound => 404u16,
@@ -272,28 +271,22 @@ pub fn build_response(req: Request, config: &ServerConfig) -> Response {
 }
 
 fn handle_with_route(req: Request, config: &ServerConfig) -> Response {
-    println!("path -> -> -> {}", req.path);
     match match_location(&req.path, config) {
         None => error_response(StatusCode::NotFound, config),
         Some(loc) => {
-            println!("some location");
             if !is_method_allowed(&req.method, loc) {
                 error_response(StatusCode::MethodNotAllowed, config)
             } else {
                 let root = loc.root.clone();
                 match req.method {
                     Method::Get | Method::Post => {
-                        println!("get post ");
                         if let Some(cgi) = find_cgi(&req.path, loc) {
                             let relative = strip_location_prefix(&req.path, &loc.path);
-                            println!("relative path now: {}", relative);
                             let script = format!("{}/{}", root, relative);
                             CgiRunner::new(&cgi.interpreter, &script).run(&req)
                         } else {
                             match req.method {
                                 Method::Get => {
-                                    println!("get found");
-                                    println!("location before stipr {}", req.path);
                                     //let relative = strip_location_prefix(&req.path, &loc.path);
                                     // println!("location after stipr {}", relative);
 
@@ -322,7 +315,6 @@ fn handle_with_route(req: Request, config: &ServerConfig) -> Response {
     }
 }
 fn handle_login(req: &Request) -> Response {
-    println!("-----------> in the login handler");
     // Parse body as "username=sam&password=secret"
     let body = String::from_utf8_lossy(&req.body);
     let mut params: HashMap<&str, &str> = HashMap::new();
