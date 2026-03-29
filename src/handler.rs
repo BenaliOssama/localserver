@@ -270,6 +270,22 @@ pub fn build_response(req: Request, config: &ServerConfig) -> Response {
     }
 }
 
+
+// to fix the problem of root, can be injected ... 
+fn safe_path(root: &str, url_path: &str) -> Option<std::path::PathBuf> {
+    let root     = std::path::Path::new(root).canonicalize().ok()?;
+    let joined   = root.join(url_path.trim_start_matches('/'));
+    let resolved = joined.canonicalize().ok()?;
+
+    // Verify the resolved path is still inside root
+    if resolved.starts_with(&root) {
+        Some(resolved)
+    } else {
+        None  // Path traversal attempt — reject
+    }
+}
+
+
 fn handle_with_route(req: Request, config: &ServerConfig) -> Response {
     match match_location(&req.path, config) {
         None => error_response(StatusCode::NotFound, config),
