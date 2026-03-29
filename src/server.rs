@@ -258,8 +258,13 @@ impl Server {
         // Write complete — clean up
         let _ = epoll.remove(fd);
         write_buffers.remove(&fd);
+
+        // Proper TCP shutdown — flush kernel buffer before closing
+        unsafe {
+            libc::shutdown(fd, libc::SHUT_WR);
+            libc::close(fd);
+        }
         std::mem::forget(stream);
-        unsafe {libc::close(fd)};
     }
     fn serialize_response(&self, response: &Response) -> Vec<u8> {
         let status = if response.redirect_location.is_some() {
