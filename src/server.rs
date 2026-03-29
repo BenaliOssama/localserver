@@ -13,13 +13,17 @@ use crate::handler;
 use crate::request::Request;
 use crate::response::{Response, StatusCode};
 
+use crate::tui::{LogLevel, ServerEvent};
+use std::sync::mpsc;
+
 pub struct Server {
     configs: Vec<ServerConfig>,
+    tx: Option<mpsc::Sender<ServerEvent>>,
 }
 
 impl Server {
-    pub fn new(configs: Vec<ServerConfig>) -> Server {
-        Server { configs }
+    pub fn new(configs: Vec<ServerConfig>, tx: Option<mpsc::Sender<ServerEvent>>) -> Server {
+        Server { configs, tx }
     }
     // Find the right config for this request based on Host header
     fn match_config(&self, req: &Request) -> &ServerConfig {
@@ -37,11 +41,21 @@ impl Server {
             .unwrap_or(&self.configs[0])
     }
     pub fn run(&self) -> Result<(), Box<dyn std::error::Error>> {
+        let addr = self.configs[0].addr();
+        let port = self.configs[0].port;
+
+        if let Some(tx) = &self.tx {
+            let _ = tx.send(ServerEvent::ServerStarted {
+                port,
+                addr: addr.clone(),
+            });
+        }
+
         // Use first config's addr to bind
         let addr = self.configs[0].addr();
         let listener = TcpListener::bind(&addr)?;
         set_nonblocking(listener.as_raw_fd())?;
-        println!("Server listening on http://{}", addr);
+        //("Server listening on http://{}", addr);
 
         let epoll = Epoll::new()?;
         epoll.add(listener.as_raw_fd())?;
@@ -66,7 +80,12 @@ impl Server {
                 .collect();
 
             for fd in timed_out {
-                eprintln!("Connection {} timed out", fd);
+                if let Some(tx) = &self.tx {
+                    let _ = tx.send(ServerEvent::Log {
+                        level: LogLevel::Error,
+                        message: format!("Connection {} timed out", fd),
+                    });
+                }
                 let _ = epoll.remove(fd);
                 read_buffers.remove(&fd);
                 write_buffers.remove(&fd);
@@ -108,23 +127,36 @@ impl Server {
         loop {
             match listener.accept() {
                 Ok((stream, addr)) => {
-                    println!("[{}] New connection: {}", self.configs[0].addr(), addr);
                     let fd = stream.as_raw_fd();
                     set_nonblocking(fd)?;
                     epoll.add(fd)?;
                     buffers.insert(fd, Vec::new());
                     connect_times.insert(fd, Instant::now());
+
+                    if let Some(tx) = &self.tx {
+                        let _ = tx.send(ServerEvent::ConnectionOpened {
+                            port: self.configs[0].port,
+                        });
+                    }
+
                     std::mem::forget(stream);
                 }
                 Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => break,
                 Err(e) => {
-                    eprintln!("Accept error: {}", e);
+                    if let Some(tx) = &self.tx {
+                        let _ = tx.send(ServerEvent::Log {
+                            level: LogLevel::Error,
+                            message: format!("Accept error: {}", e),
+                        });
+                    }
                     break;
                 }
             }
         }
         Ok(())
     }
+
+    // handle write
     fn handle_read(
         &self,
         fd: i32,
@@ -132,6 +164,7 @@ impl Server {
         read_buffers: &mut HashMap<i32, Vec<u8>>,
         write_buffers: &mut HashMap<i32, Vec<u8>>,
     ) {
+        let request_start = Instant::now();
         let mut buf = [0u8; 4096];
         let mut stream = unsafe {
             use std::os::unix::io::FromRawFd;
@@ -143,10 +176,16 @@ impl Server {
             match stream.read(&mut buf) {
                 Ok(0) => {
                     // Client disconnected
+                    if let Some(tx) = &self.tx {
+                        let _ = tx.send(ServerEvent::ConnectionClosed {
+                            port: self.configs[0].port,
+                        });
+                    }
                     let _ = epoll.remove(fd);
                     read_buffers.remove(&fd);
                     write_buffers.remove(&fd);
                     std::mem::forget(stream);
+                    unsafe { libc::close(fd) };
                     return;
                 }
                 Ok(n) => {
@@ -156,7 +195,12 @@ impl Server {
                 }
                 Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => break,
                 Err(e) => {
-                    eprintln!("Read error on fd {}: {}", fd, e);
+                    if let Some(tx) = &self.tx {
+                        let _ = tx.send(ServerEvent::Log {
+                            level: LogLevel::Error,
+                            message: format!("Read error on fd {}: {}", fd, e),
+                        });
+                    }
                     let _ = epoll.remove(fd);
                     read_buffers.remove(&fd);
                     write_buffers.remove(&fd);
@@ -186,7 +230,6 @@ impl Server {
         if let Some(data) = read_buffers.get(&fd) {
             let response = match Request::parse(data) {
                 Some(mut req) => {
-                    // Extract query string
                     let query_string = if let Some((path, query)) = req.path.clone().split_once('?')
                     {
                         req.path = path.to_string();
@@ -198,15 +241,36 @@ impl Server {
                         .insert("x-query-string".to_string(), query_string);
 
                     let config = self.match_config(&req);
-                    handler::build_response(req, config) // ← returns Response, doesn't send
+                    let response = handler::build_response(req.clone(), config);
+
+                    // Now we know the real status code
+                    if let Some(tx) = &self.tx {
+                        let _ = tx.send(ServerEvent::Request {
+                            port: config.port,
+                            method: format!("{:?}", req.method),
+                            path: req.path.clone(),
+                            status: status_code_u16(&response.status),
+                            duration_ms: request_start.elapsed().as_millis() as u64,
+                        });
+                    }
+
+                    response
                 }
-                None => Response::error(StatusCode::BadRequest),
+                None => {
+                    if let Some(tx) = &self.tx {
+                        let _ = tx.send(ServerEvent::Request {
+                            port: self.configs[0].port,
+                            method: "???".to_string(),
+                            path: "/".to_string(),
+                            status: 400,
+                            duration_ms: request_start.elapsed().as_millis() as u64,
+                        });
+                    }
+                    Response::error(StatusCode::BadRequest)
+                }
             };
 
-            // Store response bytes in write buffer
             write_buffers.insert(fd, self.serialize_response(&response));
-
-            // Tell epoll we want to write
             let _ = epoll.watch_write(fd);
         }
 
@@ -244,7 +308,12 @@ impl Server {
                         return;
                     }
                     Err(e) => {
-                        eprintln!("Write error on fd {}: {}", fd, e);
+                        if let Some(tx) = &self.tx {
+                            let _ = tx.send(ServerEvent::Log {
+                                level: LogLevel::Error,
+                                message: format!("Write error on fd {}: {}", fd, e),
+                            });
+                        }
                         let _ = epoll.remove(fd);
                         write_buffers.remove(&fd);
                         std::mem::forget(stream);
@@ -297,5 +366,17 @@ impl Server {
         let mut bytes = header.into_bytes();
         bytes.extend_from_slice(&response.body);
         bytes
+    }
+}
+
+fn status_code_u16(status: &StatusCode) -> u16 {
+    match status {
+        StatusCode::Ok => 200,
+        StatusCode::BadRequest => 400,
+        StatusCode::Forbidden => 403,
+        StatusCode::NotFound => 404,
+        StatusCode::MethodNotAllowed => 405,
+        StatusCode::ContentTooLarge => 413,
+        StatusCode::InternalServerError => 500,
     }
 }

@@ -41,7 +41,7 @@ fn start_server() -> u16 {
     };
 
     thread::spawn(move || {
-        localserver::server::Server::new(vec![config])
+        localserver::server::Server::new(vec![config], None)
             .run()
             .unwrap();
     });
@@ -97,7 +97,7 @@ fn header(bytes: &[u8], name: &str) -> Option<String> {
 }
 
 // ── Helper: setup a temp www root with a file ─────────────────────────────────
-
+#[allow(dead_code)]
 fn setup_www(name: &str, file: &str, content: &[u8]) -> String {
     let root = format!("/tmp/e2e_{}", name);
     let _ = fs::remove_dir_all(&root);

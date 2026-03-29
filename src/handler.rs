@@ -288,7 +288,7 @@ fn handle_with_route(req: Request, config: &ServerConfig) -> Response {
                             match req.method {
                                 Method::Get => {
                                     //let relative = strip_location_prefix(&req.path, &loc.path);
-                                    // println!("location after stipr {}", relative);
+                                    // //("location after stipr {}", relative);
 
                                     serve_file(&req.path, &root, config)
                                 }

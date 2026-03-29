@@ -108,7 +108,6 @@ pub fn parse_body_size(s: &str) -> Result<usize, String> {
 
 #[test]
 fn test_duplicate_port_fails() {
-    use super::*;
     // Simulating Config::from_file behavior — we test the validation
     // by checking two servers with same host:port
     let input = r#"

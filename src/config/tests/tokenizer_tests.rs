@@ -1,4 +1,4 @@
-use crate::config::tokenizer::{Token, TokenKind, tokenize};
+use crate::config::tokenizer::{ TokenKind, tokenize};
 
 // ── Helper ────────────────────────────────────────────────────────────────────
 

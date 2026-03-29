@@ -93,6 +93,7 @@ pub fn start_server() -> u16 {
 }
 
 // Start a CGI-enabled server
+#[warn(dead_code)]
 pub fn start_cgi_server() -> u16 {
     let port = free_port();
 
@@ -170,7 +171,7 @@ raise Exception('intentional crash')
 // Internal helper — spawns a server thread and waits for it to start
 fn spawn_server(config: ServerConfig) {
     thread::spawn(move || {
-        localserver::server::Server::new(vec![config])
+        localserver::server::Server::new(vec![config], None)
             .run()
             .unwrap();
     });

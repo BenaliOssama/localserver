@@ -24,7 +24,7 @@ fn main() -> std::io::Result<()> {
 
         listeners.insert(token, listener);
 
-        println!("Listening on {}", addr);
+        ////("Listening on {}", addr);
     }
 
     loop {
@@ -39,9 +39,9 @@ fn main() -> std::io::Result<()> {
                         Ok((stream, client_addr)) => {
                             let local_addr = stream.local_addr()?;
 
-                            println!("Client: {}", client_addr);
-                            println!("Server IP+Port called: {}", local_addr);
-                            println!("---");
+                            //("Client: {}", client_addr);
+                            //("Server IP+Port called: {}", local_addr);
+                            //("---");
                         }
                         Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {
                             break;

@@ -1,3 +1,6 @@
+#[warn(dead_code)]
+use crate::config::tokenizer;
+
 
 use super::errors::{ParseError, ParseResult};
 use super::tokenizer::{Token, TokenKind};
