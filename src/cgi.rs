@@ -6,6 +6,7 @@ use std::io::Write;
 use std::process::{Command, Stdio};
 use std::time::Duration;
 
+#[allow(dead_code)]
 pub struct CgiRunner {
     pub interpreter: String,
     pub script_path: String,
@@ -20,6 +21,7 @@ impl CgiRunner {
             timeout: Duration::from_secs(10),
         }
     }
+    #[allow(dead_code)]
     pub fn with_timeout(mut self, timeout: Duration) -> CgiRunner {
         self.timeout = timeout;
         self
@@ -193,7 +195,7 @@ fn method_str(method: &crate::request::Method) -> &str {
         crate::request::Method::Unknown(s) => s.as_str(),
     }
 }
-
+#[allow(dead_code)]
 fn query_string(path: &str) -> &str {
     // Extract query string from path — "/cgi/hello.py?foo=bar" → "foo=bar"
     match path.split_once('?') {

@@ -68,6 +68,7 @@ impl SessionStore {
         id
     }
 
+    #[allow(dead_code)]
     // Get a session by ID — returns None if missing or expired
     pub fn get(&mut self, id: &str) -> Option<&Session> {
         // Evict if expired
@@ -111,6 +112,7 @@ impl SessionStore {
         self.sessions.remove(id);
     }
     // Evict all expired sessions
+    #[allow(dead_code)]
     pub fn cleanup(&mut self) {
         self.sessions.retain(|_, s| !s.is_expired());
     }

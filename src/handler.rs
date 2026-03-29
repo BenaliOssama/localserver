@@ -250,7 +250,7 @@ pub fn build_response(req: Request, config: &ServerConfig) -> Response {
                 "<html><body>Redirecting to <a href='{}'>{}</a></body></html>",
                 redirect_to, redirect_to
             );
-            let header = format!(
+            let _header = format!(
                 "HTTP/1.1 301 Moved Permanently\r\nLocation: {}\r\nContent-Length: {}\r\nContent-Type: text/html\r\n\r\n{}",
                 redirect_to,
                 body.len(),
@@ -364,8 +364,9 @@ fn handle_whoami(req: &Request, config: &ServerConfig) -> Response {
     }
 }
 // Keep the test helper working
+#[allow(dead_code)]
 pub fn handle_with_root(req: &mut Request, stream: &mut TcpStream, root: &str) {
-    let mut config = ServerConfig {
+    let config = ServerConfig {
         host: "127.0.0.1".to_string(),
         port: 8080,
         server_name: None,

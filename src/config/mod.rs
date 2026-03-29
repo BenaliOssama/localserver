@@ -5,7 +5,7 @@ pub mod tokenizer;
 #[cfg(test)]
 mod tests;
 
-use std::{collections::HashMap, net::ToSocketAddrs};
+use std::{collections::HashMap};
 
 #[derive(Debug)]
 pub struct Config {
@@ -22,6 +22,7 @@ pub struct ServerConfig {
     pub locations: Vec<Location>,
 }
 
+#[allow(dead_code)]
 #[derive(Debug)]
 pub struct Location {
     pub path: String,

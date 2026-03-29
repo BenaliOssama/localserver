@@ -2,7 +2,7 @@
 
 use libc::epoll_event;
 use std::collections::HashMap;
-use std::io::{Read, Write};
+use std::io::Read;
 use std::net::TcpListener;
 use std::os::unix::io::AsRawFd;
 use std::time::Instant;

@@ -53,6 +53,7 @@ impl Epoll {
     }
 
     // Switch back to read-watching
+    #[allow(dead_code)]
     pub fn watch_read(&self, socket_fd: RawFd) -> Result<(), std::io::Error> {
         let mut event = epoll_event {
             events: (EPOLLIN | EPOLLET) as u32,

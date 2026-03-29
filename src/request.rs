@@ -10,6 +10,7 @@ pub enum Method {
     Unknown(String),
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub struct Request {
     pub method: Method,
@@ -95,6 +96,7 @@ impl Request {
         self.cookies().get("session_id").cloned()
     }
 
+    #[allow(dead_code)]
     pub fn content_length(&self) -> usize {
         self.headers
             .get("content-length")
