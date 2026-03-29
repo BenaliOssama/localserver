@@ -161,6 +161,7 @@ impl Server {
                     read_buffers.remove(&fd);
                     write_buffers.remove(&fd);
                     std::mem::forget(stream);
+                    unsafe { libc::close(fd) };
                     return;
                 }
             }
@@ -227,7 +228,13 @@ impl Server {
                     break;
                 }
                 match stream.write(data) {
-                    Ok(0) => break,
+                    Ok(0) => {
+                        let _ = epoll.remove(fd);
+                        write_buffers.remove(&fd);
+                        std::mem::forget(stream);
+                        unsafe { libc::close(fd) };
+                        return;
+                    }
                     Ok(n) => {
                         data.drain(..n);
                     }
@@ -241,6 +248,7 @@ impl Server {
                         let _ = epoll.remove(fd);
                         write_buffers.remove(&fd);
                         std::mem::forget(stream);
+                        unsafe { libc::close(fd) };
                         return;
                     }
                 }
@@ -251,6 +259,7 @@ impl Server {
         let _ = epoll.remove(fd);
         write_buffers.remove(&fd);
         std::mem::forget(stream);
+        unsafe {libc::close(fd)};
     }
     fn serialize_response(&self, response: &Response) -> Vec<u8> {
         let status = if response.redirect_location.is_some() {
