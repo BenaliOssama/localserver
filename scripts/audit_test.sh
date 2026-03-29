@@ -404,7 +404,7 @@ SIEGE=$(which siege 2>/dev/null)
 if [ -z "$SIEGE" ]; then
     fail "siege not installed — run: sudo apt install siege"
 else
-    log "Running siege -b for 1s on $BASE/..."
+    log "Running siege -b for 30s on $BASE/..."
     mkdir -p www
     echo "<html><body><h1>Siege Test</h1></body></html>" > www/siege_test.html
 
